@@ -1,0 +1,51 @@
+# SC_v3_6mq: SC_v2_6mq plant, 10 d / 300 km episodes, data buffer, altitude/data scheduled weights (python/arlamx_v2/sc3.py).
+version: 3
+nav: gps                 # gps: GNSS r, v (0.205 W sunlit) | est: nav.py, no receiver
+episode_days: 10
+term_km: 300
+variant: v10r6
+vehicle: vehicle_v3c
+sensors: sensors_gaussian
+mtq_duty: 0.8            # rods on 80 % of each 2 s substep; magnetometer reads in the 20 % gap
+cmd_frame: flowS         # advisor command held in the flow frame (ZOH), re-evaluated every 2 s; roll: cells to the Sun
+gains: {wn: 0.05, zeta: 1.5}   # MRP PD from analysis/margin_gains_ss.json; K = 4 I wn^2, P = 2 zeta I wn
+ram_axis_body: [-0.5, -0.8660254, 0.0]   # min drag: -d_min on ram, membrane normal on orbit normal
+orbit:
+  altitude_km: [310, 480]
+  inc_deg: [10, 60]
+  ecc: [0.0, 0.005]
+  f107: [70, 250]
+  ap: [2, 120]
+sun_sigma: 0.05
+eclipse_mode: min_drag   # flight mode manager: min drag + all rods (damping) in eclipse, any advisor
+eclipse_frame: flowB     # eclipse roll: membrane normal on the field (max rod authority); sunlit: cmd_frame (Sun)
+weights:
+  base: 0.5
+  slew: 0.3
+  env: 0.4
+  rest: 0.8              # burn-in P4 (was 0.25)
+  att: 0.6               # tracking error, min(1, err / 30 deg)
+  sun: 0.0               # sunlit cell illumination |s.n| (burn-in knob)
+  ecl_drag: 0.6
+  ecl_mtq: 0.6
+  downlink: 3.0          # burn-in P4 (was 0.6)
+  band: 0.1
+  low: 1.5              # full-run r2 (was 0.8)
+  brownout: 3.0         # full-run r2 (was 1.5)
+  term: 5.0              # reaching term_km before episode_days
+  alive: 3.0             # per step above term_km: mean of the other terms is -1.4 to -2.8, so early re-entry must not pay
+  dl_shape: 0.3          # onboard-believed pointing shaping during a pass
+schedule:                # w(h, b): lifetime terms x (1 + alt u), downlink x (1 + buf (2b - 1)) (1 - dl_alt u), u = (450 - h) / 150
+  alt: 1.0
+  buf: 0.5
+  dl_alt: 0.5
+data: {gen_min_d: 30.0, cap_min: 90.0, b0: 0.5}   # link-minutes: payload fill per day, buffer size, start fill
+nav_est: {sig_r0_m: 100.0, sig_v0_ms: 0.1, bc0: 0.6, h_s: 30.0, alpha: 0.5, beta: 4.0, gamma: 0.05, t_sigma_s: 0.5, lit_min: 0.1}
+slew_deg: 2.0
+low_thr: 0.25
+ppo:                     # 64 x 44 envs = 2816 samples per update (~17 updates per 50k burn-in)
+  learning_rate: 5.0e-4
+  n_steps: 64
+  batch_size: 704
+  n_epochs: 10
+  ent_coef: 0.003

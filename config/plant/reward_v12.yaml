@@ -1,0 +1,79 @@
+# SC_v12 — start from frozen reward_v10.yaml. Plant/env/code paths unchanged
+# (variant v10). NEW terms that the v10 composer does not have are applied by
+# the train_v12 wrapper (r_slew). One knob per round.
+#
+# r0: w_slew {0.25, 0.5, 1.0}  (wrapper) — this file's v7/stability/delegation
+#     numbers are the v10 freeze; do not edit them in r0.
+# r1: brownout_weight {20, 50}  [planned]
+# r2: w_env {0, 0.1, 0.3}       [needs env hook; not in r0]
+# r3: w_pt {0, 0.5}             [needs env hook; not in r0]
+#
+# Tags: [V10] frozen from reward_v10 · [V12] wrapper-only
+name: SC_v12
+variant: v10                   # env variant — v12 is a training/reward overlay
+
+v7:
+  band_weight: 1.0            # [V10]
+  band_lo: 0.4
+  band_hi: 0.6
+  band_above_mode: exp
+  band_decay_k: 6.0
+  band_above_slope: 2.0
+  band_low_weight: 4.0
+  band_depletion: 50.0
+  dE_weight: 2.6              # [V10] not a knob
+  gs_weight: 2.4              # [V10] do not raise (r2 lesson)
+  tier_deg: [2.0, 5.0, 10.0]
+  tier_scale: [1.0, 0.5, 0.25]
+  gs_penalty: 0.5
+  feas_weight: 1.0
+  smooth_weight: 0.10         # [V10] angle penalty; r_slew is extra, in wrapper
+  omega_weight: 0.002
+  momentum_weight: 0.001
+  thrift_weight: 1.5
+  brownout_weight: 100.0      # [V10] r1 may drop to 20
+  brownout_gen: 1.0
+
+stability:
+  margin_weight: 4.0
+  h_soft_km: 320.0
+  h_floor_km: 250.0
+  decay_stab_weight: 0.6
+  decay_stab_scale: 100.0
+  decay_stab_cap: 3.0
+  power_drop_weight: 2.0
+  power_drop_thresh: 0.02
+  power_drop_scale: 0.05
+  power_drop_cap: 3.0
+
+delegation:
+  enabled: true
+  w_power: 6.0
+  w_accuracy: 6.0
+  kappa: 0.7
+  p_min: 0.05
+  p_sig: 0.25
+  torque_floor_Nm: 1.0e-11
+  tau_env_ref_Nm: 1.5e-8
+
+trend:
+  enabled: true
+  gain_alt: 0.8
+  gain_soc: 1.0
+  h_ref_km: 2.0
+  soc_ref: 0.2
+
+kf:
+  sigma_drive: 3.0e-10
+
+observation:
+  future_offsets_s: [150.0, 300.0, 450.0, 600.0, 750.0, 900.0]
+  future: true
+  history: true
+  history_offsets_s: [900.0, 750.0, 600.0, 450.0, 300.0, 150.0]
+  history_features: 4
+
+# Wrapper-only (train_v12.SlewChargeWrapper). Not read by compose_sc_v8.
+wrapper:
+  w_slew: 0.5                 # [V12] r0 default; swept {0.25, 0.5, 1.0}
+  slew_deg: 2.0               # command change above this is a slew

@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attitude, control, magnetics · ARLAMX v2.7</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false})"></script>
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX v2.7 docs</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7<small>spacecraft plant + deep-RL trainer</small></a>
+<h4>Start</h4>
+<a href="../guide/index.html">User guide</a>
+<a href="index.html">Overview</a>
+<a href="install.html">Install, build, test</a>
+<a href="architecture.html">Architecture & step loop</a>
+<h4>Physics</h4>
+<a href="aerodynamics.html">Free-molecular aerodynamics</a>
+<a href="srp.html">Solar & Earth radiation pressure</a>
+<a href="gravity.html">Gravity harmonics & third body</a>
+<a href="atmosphere.html">Atmosphere & space weather</a>
+<a href="attitude.html" class="active">Attitude, control, magnetics</a>
+<a href="geometry.html">Geometry & panel models</a>
+<h4>Deep RL</h4>
+<a href="training.html">Training & sessions</a>
+<a href="environment.html">Gym env, variants, rewards</a>
+<h4>Reference</h4>
+<a href="config.html">Configuration reference</a>
+<a href="api.html">Python / C++ API</a>
+<a href="validation.html">Validation & known limits</a>
+<h4>Plan</h4>
+<a href="plan-cll-materials.html">CLL + material model plan</a>
+</nav>
+<main>
+<h1>Attitude, control, magnetics</h1>
+<p class="lede">Rigid-body attitude dynamics with MRPs, PD attitude laws, and magnetic actuation through the local geomagnetic field. The RL policy chooses the attitude target; the controller and magnetorquers track it.</p>
+
+<h2>Kinematics and dynamics</h2>
+<div class="eq">\[
+\dot{\boldsymbol\sigma}=\tfrac14\bigl[(1-\sigma^2)\mathbf I_3+2[\boldsymbol\sigma\times]+2\boldsymbol\sigma\boldsymbol\sigma^T\bigr]\boldsymbol\omega,\qquad
+\dot{\boldsymbol\omega}=\mathbf I^{-1}\bigl(\boldsymbol\tau-\boldsymbol\omega\times\mathbf I\boldsymbol\omega\bigr)
+\]</div>
+<ul>
+<li>MRP with the shadow-set switch at |σ| &gt; 1 after every RK4 step. DCM: \(C=I+[8S^2-4(1-\sigma^2)S]/(1+\sigma^2)^2\) (Schaub &amp; Junkins).</li>
+<li>Total torque = aero + SRP + Earth radiation + gravity gradient + control. Torques are held over each 2 s substep.</li>
+<li>Inertia: default diag(0.0125, 0.0125, 0.025) kg m². <code>set_inertia</code> accepts a full tensor; v10r6 and the SolarCat vehicles compute it from <code>vehicle*.yaml</code>.</li>
+<li><code>mode</code>: <code>point</code> (closed loop), <code>detumble</code> (B-dot), <code>prescribed</code> (the attitude is set to the target each substep with ω = 0; used for decay studies).</li>
+</ul>
+
+<h2>Command path</h2>
+<ol>
+<li>The policy outputs a quaternion. The env normalises it (identity if invalid).</li>
+<li><code>slerp_clip</code> limits the change from the held command to <code>max_slew_rad</code> (40–45°) per step.</li>
+<li><code>cmd_frame</code>: <code>inertial</code> holds q_BN. <code>flow</code>, <code>flowB</code> and <code>flowS</code> hold the command in the flow frame and re-evaluate the target every substep with orbit-rate feed-forward ω = C_BN h/r².</li>
+<li>Optional <code>set_nav(r, v)</code>: flow-frame targets come from an onboard two-body RK4 nav state instead of truth (SC_v3 no-GNSS studies).</li>
+</ol>
+
+<h2>Attitude laws</h2>
+<div class="eq">\[
+\text{MRP: }\ \boldsymbol\tau=-K_p\,\boldsymbol\sigma_{BR}-K_d(\boldsymbol\omega-\boldsymbol\omega_r)+\boldsymbol\omega\times\mathbf I\boldsymbol\omega,\qquad
+\text{Quaternion: }\ \boldsymbol\tau=-K_p\,\mathbf q_{e,v}-K_d(\boldsymbol\omega-\boldsymbol\omega_r)+\boldsymbol\omega\times\mathbf I\boldsymbol\omega
+\]</div>
+<ul>
+<li>Per-axis torque clip (<code>max_torque</code>). A body-rate limiter rescales the command if the predicted |ω| exceeds <code>max_body_rate</code> (0.125°/s default).</li>
+<li>Gains: <code>config/plant/gains_mrp.yaml</code> (v8+), otherwise kp = 4e-4 and kd = 8e-3. <code>attitude.law</code> or <code>--controller</code> selects the law.</li>
+<li><code>attitude.ideal_torque: true</code> applies the PD torque as a pure body couple. That was the v2.1 plant the v8–v14 campaigns were tuned on (<code>.physics_ideal.yaml</code>). The default <code>false</code> routes it through the magnetorquers.</li>
+</ul>
+
+<h2>Magnetic actuation</h2>
+<div class="eq">\[
+\boldsymbol\tau=\mathbf m\times\mathbf B,\qquad \text{3 coils: }\ \mathbf m=\mathrm{clip}\Bigl(\frac{\mathbf B\times\boldsymbol\tau_\mathrm{cmd}}{|\mathbf B|^2},\ \mathbf m_\mathrm{max}\Bigr)
+\]</div>
+<ul>
+<li>Nothing can be produced along B, so <code>tau_shortfall_frac</code> = 1 − |τ|/|τ_cmd| reports the missing torque.</li>
+<li><b>Torque rods</b> (v10r6, SolarCat six-rod): torque-space least squares \(d=A^T(AA^T)^+\tau\) with \(a_k=u_k\times B\), then one uniform scale so that \(|d_k|\le d_{\max,k}\). Rods can be gated on or off by the policy.</li>
+<li><code>mtq_duty</code> (0, 1]: the coil on-fraction per substep. The rest is the magnetometer window.</li>
+<li><b>B-dot</b> detumble: \(\mathbf m=-k\,\dot{\mathbf B}\) (finite difference), used in brownout recovery.</li>
+<li>Power (<code>power.py</code>): I²R-quadratic in the applied dipole (v8+), 249 mW peak for the 3-coil card.</li>
+</ul>
+
+<h2>Geomagnetic field</h2>
+<ul>
+<li><code>magnetics.model: wmm</code>: spherical harmonics to degree 12 with secular variation, Schmidt semi-normalised (<code>mag/field.cpp</code>).</li>
+<li><code>dipole</code>: tilted dipole from the IGRF-13/WMM2020 g₁⁰, g₁¹, h₁¹ coefficients. The <code>fast</code> preset uses it.</li>
+<li>The env refuses a silent dipole fallback when a WMM file was requested but failed to load.</li>
+</ul>
+<div class="warn"><b>WMM epoch</b>
+The default <code>data/WMM.COF</code> is WMM-2020 (valid 2020–2025), but the simulation epoch is 2026-01-15. The model is being extrapolated past its validity window. <code>data/WMM2025.COF</code> is already in the repo; set <code>ARLAMX_WMM=data/WMM2025.COF</code> to use it.</div>
+
+<h2>Onboard pieces (flight-representative side)</h2>
+<ul>
+<li><code>propagator.py</code> / <code>propagator_f32.cpp</code>: FP32 two-body + J2 + exponential drag + held along-track SRP. Used for the observation forecast blocks and the Duo arbiter.</li>
+<li><code>nav.py</code>: no-GNSS navigation (FP32 J2 + drag from the launch state, eclipse-timing fixes from the solar panels).</li>
+<li><code>estimators.py</code>: environmental-torque Kalman filter (τ, τ̇ states) from the rigid-body torque measurement.</li>
+<li><code>sensors.py</code>: gyro, accelerometer, magnetometer and GNSS noise/bias from datasheet YAMLs (<code>sensors_solarcat.yaml</code>, <code>sensors_gaussian.yaml</code>).</li>
+<li><code>int8.py</code>, <code>quantize.py</code>, <code>inference_budget.py</code>: integer-only actor for STM32U575-class hardware.</li>
+</ul>
+<h2>References</h2>
+<ol class="small">
+<li>Schaub, H. &amp; Junkins, J. L. (2018). <i>Analytical Mechanics of Space Systems</i>, 4th ed., ch. 3.</li>
+<li>Wie, B., Weiss, H. &amp; Arapostathis, A. (1989). Quaternion feedback regulator. <i>JGCD</i> 12(3).</li>
+<li>Stickler, A. C. &amp; Alfriend, K. T. (1976). Elementary magnetic attitude control system. <i>J. Spacecraft</i> 13(5).</li>
+<li>Chulliat, A. et al. (2020, 2025). The US/UK World Magnetic Model.</li>
+<li>Markley, F. L. &amp; Crassidis, J. L. (2014). <i>Fundamentals of Spacecraft Attitude Determination and Control</i>, ch. 3.</li>
+</ol>
+
+<footer>ARLAMX v2.7 documentation · generated 2026-09-30 from the source tree (cpp/, python/arlamx_v2/, config/). Equations render with KaTeX when online; offline they show as TeX.</footer>
+</main>
+</div>
+</body>
+</html>

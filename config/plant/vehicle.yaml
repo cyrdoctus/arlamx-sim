@@ -1,0 +1,17 @@
+# Hex sail with six beam torque rods (user, 2026-09-25). Used by variant v10r6.
+name: hex_v3_6rod
+geom: earthcup_hex_v3.geom
+mass_kg:
+  pcb_battery: 0.080     # [USER] at the centre
+  rods: 0.170            # [USER] six rods, one per beam
+  structure: 0.500       # [USER] membrane + beams
+beam_share: area         # structure share on the beams: "area" = beam area / geom area [ASSUME], or a number 0..1
+membrane_radius_m: 0.488 # geom header: hexagon circumradius at the beam inner face
+beam_length_m: 0.5       # geom header
+beam_apothem_m: 0.433    # beam midline distance from the centre (geom centroids)
+cp_offset_m: [0.01, 0.0, 0.0]   # [ASSUME] balance requirement, body X (as v8)
+rods:
+  count: 6               # one per beam, axis along the beam (in-plane)
+  dipole_max_Am2: 0.596  # [ASSUME] v8 coil design scaled by mass: 3.388 A m2 / 0.161 kg x 0.02833 kg
+  power_peak_W: 0.0439   # [ASSUME] v8 coil I^2R scaled by mass: 0.2494 W / 0.161 kg x 0.02833 kg
+b_ref_T: 2.5963e-5       # weakest field at 300 km (power_mtq.yaml)

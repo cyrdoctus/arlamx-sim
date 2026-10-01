@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Control loop and deep RL · ARLAMX</title>
+<link rel="stylesheet" href="../html/assets/style.css">
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX guide</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7.5<small>user guide</small></a>
+<h4>Guide</h4>
+<a href="index.html">Overview</a>
+<a href="commands.html">Commands</a>
+<a href="fmf.html">Free-molecular flow</a>
+<a href="control.html" class="active">Control loop and deep RL</a>
+<a href="simplify.html">STL simplification</a>
+<a href="libraries.html">Python libraries</a>
+<h4>Also</h4>
+<a href="../html/attitude.html">Attitude reference</a>
+<a href="../html/training.html">Training reference</a>
+<a href="../html/environment.html">Environment reference</a>
+</nav>
+<main>
+<h1>Control loop and deep RL</h1>
+<p class="lede">The learned network does not command coil current directly. It chooses a target attitude, on a slow clock. A classical law and the magnetorquers track that target on a fast clock. The same split is how you design the onboard loop, whether the advisor is a script or a network.</p>
+
+<h2>Two clocks</h2>
+<ol>
+<li><b>Advisor step, 300 s</b> (150 s on variant v6). The advisor emits a quaternion. Later variants also emit a torque-authority split, or on/off gates for six torque rods. The quaternion is normalised. The change from the previous command is limited to about 40°.</li>
+<li><b>Plant step, 2 s</b> (<code>integrator.rk4_step_s</code> in the physics YAML). Classical RK4 integrates position, velocity, modified Rodrigues parameters, and body rate. Aero, radiation pressure, gravity-gradient, and control torques are held across the substep.</li>
+</ol>
+<p>Three plant modes:</p>
+<table>
+<thead><tr><th>Mode</th><th>What it does</th></tr></thead>
+<tbody>
+<tr><td><code>point</code></td><td>Closed loop. The attitude law tracks the advisor’s quaternion. This is the training mode.</td></tr>
+<tr><td><code>detumble</code></td><td>B-dot. Used when the battery model browns out.</td></tr>
+<tr><td><code>prescribed</code></td><td>The attitude is set to the target and the rate is zero. Decay studies use this so the orbit change is the aerodynamics.</td></tr>
+</tbody>
+</table>
+
+<h2>Inner law</h2>
+<p>Pick the law with <code>--controller mrp</code> or <code>--controller quaternion</code>, or with <code>attitude.law</code> in the physics file. Both are PD laws with a per-axis torque clip and a body-rate limit. Gains are in <code>config/plant/gains_mrp.yaml</code>.</p>
+<p>The torque command then goes through the magnetic field.</p>
+<ul>
+<li><b>Three coils.</b> The dipole is the component of the demanded torque that is perpendicular to B, clipped to <code>dipole_max</code> in <code>config/plant/power_mtq.yaml</code>. The torque the spacecraft actually gets is m × B. There is no torque along B.</li>
+<li><b>Six torque rods</b> on variant <code>v10r6</code>. The SolarCat cards <code>config/plant/vehicle_v3*.yaml</code> supply the rod axes, the dipoles, and the plate file. The demanded torque is shared across rod axes by least squares, then scaled so each rod stays inside its dipole. The advisor’s extra six numbers gate rods on or off.</li>
+<li><code>attitude.ideal_torque: true</code> applies the PD torque as a body couple and skips the magnetic constraint. The earlier campaign gains were tuned that way. The file default is <code>false</code>, which is the magnetic plant. Read that switch before you treat a trained policy as a flight law. The measurement is written up in <code>docs/modules/15_control_magnetorquer.md</code>.</li>
+</ul>
+<p><code>cmd_frame</code> is <code>inertial</code> by default (hold the quaternion in inertial axes). <code>flow</code> holds it in the airflow frame and refreshes the target every substep. An optional onboard two-body state can feed that flow frame when you are studying navigation without GNSS.</p>
+
+<h2>What you change while designing the loop</h2>
+<table>
+<thead><tr><th>Question</th><th>Where</th></tr></thead>
+<tbody>
+<tr><td>MRP or quaternion</td><td><code>--controller</code> or <code>attitude.law</code></td></tr>
+<tr><td>Magnetic plant or ideal couple</td><td><code>attitude.ideal_torque</code></td></tr>
+<tr><td>Gains, rate limit, gate floor</td><td><code>config/plant/gains_mrp.yaml</code></td></tr>
+<tr><td>Dipole and power</td><td><code>config/plant/power_mtq.yaml</code></td></tr>
+<tr><td>Mass, inertia, rods, plate file</td><td><code>config/plant/vehicle.yaml</code> and <code>vehicle_v3*.yaml</code> (variant <code>v10r6</code>)</td></tr>
+<tr><td>Advisor period</td><td><code>ArlamxV2Env(advisor_s=...)</code>. The command-line trainer uses 300 s, or 150 s for v6</td></tr>
+<tr><td>Inner step</td><td><code>integrator.rk4_step_s</code>, or <code>ArlamxV2Env(inner_dt=...)</code></td></tr>
+<tr><td>Disturbances the loop must reject</td><td><code>--physics</code> and <code>--gsi</code></td></tr>
+</tbody>
+</table>
+<p>Scripted advisors live in <code>python/arlamx_v2/advisors/</code>: minimum drag, a fixed angle of attack, a power-aware heuristic, and a sampling MPC. <code>python main.py sim advisor_run</code> flies the closed-loop campaign. Those are the baselines a trained network is compared with. <code>duo.py</code> picks between two advisors by propagating both forward.</p>
+
+<h2 id="train">Training the advisor</h2>
+<p><code>ArlamxV2Env</code> in <code>python/arlamx_v2/env.py</code> is the Gymnasium environment. One <code>step</code> is one advisor decision. Under it, the plant runs the 2 s loop, MSIS updates the density, a power model updates the state of charge, and a torque Kalman filter watches the gyros. The policy’s observation of position, velocity, and rate is the plant truth. Sensor noise enters the torque filter. That is the same observation the MPC baseline sees.</p>
+<pre><code>python main.py train --network config/network_quick.yaml
+python main.py train --algo ppo --arch 4x16 --timesteps 300000 --n-envs 32
+python main.py train --variant v10 --physics standard --controller mrp
+python main.py train --backend v12 --arch 4x18 --timesteps 600000</code></pre>
+<table>
+<thead><tr><th>Variant</th><th>Action</th></tr></thead>
+<tbody>
+<tr><td>v3–v5</td><td>4 numbers: the target quaternion</td></tr>
+<tr><td>v6</td><td>Quaternion plus a torque scale. Advisor step is 150 s</td></tr>
+<tr><td>v7–v11</td><td>Quaternion plus three authority numbers. From v8 those are a delegation split per axis</td></tr>
+<tr><td>v10r6</td><td>Quaternion plus six rod gates. Plates and inertia come from the vehicle card</td></tr>
+</tbody>
+</table>
+<p>The default reward from v8 onward is dominated by orbital-energy change against a drag baseline, with terms for the power band, ground-station pointing, and altitude. Weights are <code>config/plant/reward_*.yaml</code>. Override one of them with <code>--set 'train.reward_w={dE_weight: 3.0}'</code>.</p>
+<p>The network is an MLP, <code>width</code> repeated <code>layers</code> times. The default in <code>config/network.yaml</code> is PPO, 4×16, 300&nbsp;000 steps, 32 environments. SAC and TD3 are the other algorithms. VecNormalize scales the reward and leaves the observation raw. The small width is deliberate: <code>inference_budget</code> sizes the actor for an STM32U575-class microcontroller.</p>
+<p>Training is FP32. After it finishes:</p>
+<pre><code>python main.py quantize --in outputs/models/&lt;id&gt;/models/ppo_&lt;id&gt;.zip --out int8.zip</code></pre>
+<p>Each session freezes the plant it actually used inside <code>outputs/snapshots/</code>. Replay with <code>--from-snapshot</code>. A sweep in <code>config/sweep.yaml</code> launches several of those sessions and writes <code>outputs/results/sweeps/&lt;name&gt;.csv</code>.</p>
+<div class="note"><b>A different spacecraft</b>
+<code>python main.py train</code> loads the hex sail, except variant <code>v10r6</code>, which loads the <code>geom:</code> path in the vehicle YAML (a file under <code>data/</code>). To train on plates you simplified yourself, build the environment with <code>ArlamxV2Env(geom_path="craft_1pct.geom", ...)</code> and pass that environment to the same Stable-Baselines3 call <code>python/arlamx_v2/train.py</code> uses. Mass, inertia, and coil limits still have to match the vehicle, or the reward is scoring a different spacecraft than the one you will fly.</div>
+
+<h2>A design pass that stays small</h2>
+<ol>
+<li>Simplify the exterior mesh (<a href="simplify.html">STL page</a>) and decide mass, inertia, and dipole.</li>
+<li>Run <code>python main.py decay</code> on the closest shipped geometry, or the plate snippet on the <a href="fmf.html">flow page</a>, so you know the aerodynamic torque the loop has to beat.</li>
+<li>Pick <code>ideal_torque</code> on purpose. Leave it <code>false</code> when the question is magnetic authority.</li>
+<li>Fly <code>advisor_run</code> (heuristic and MPC) on that physics file. That is the bar.</li>
+<li>Train a 4×16 PPO for a short budget (<code>network_quick.yaml</code>), read the snapshot, then lengthen the run only if the short run is healthy.</li>
+<li>Quantize the actor you intend to time on the microcontroller, and keep the FP32 zip beside it.</li>
+</ol>
+
+<footer>ARLAMX v2.7.5 user guide</footer>
+</main>
+</div>
+</body>
+</html>

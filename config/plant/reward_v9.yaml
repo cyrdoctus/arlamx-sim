@@ -1,0 +1,101 @@
+# SC_v9 — v8b plus temporal context and trend-adaptive weights.
+#
+# v9 keeps the whole v8b reward and adds one mechanism: the composite's two
+# biggest weights are re-scaled in flight from the trend the policy can see.
+#
+#   v9a : future block only  (t+150, t+300, t+600 s propagations)
+#   v9b : future block + past block (t-600, t-300, t-150 s stored readings)
+#
+# Both arms share this file; `observation.history` selects a from b.
+#
+# Trend features, eq. (11)-(12) in reward_v8.py:
+#
+#     d_alt_norm = (h(t+600) - h(t-600)) / h_ref        < 0 => losing altitude
+#     d_soc      =  soc(t+600) - soc(t-600)             < 0 => losing charge
+#
+#     w_dE   <- w_dE   * (1 + gain_alt * clip(-d_alt_norm, 0, 1))
+#     w_band <- w_band * (1 + gain_soc * clip(-d_soc/soc_ref, 0, 1))
+#
+# For v9a the "past" end of each difference is the current sample, so the trend
+# is forward-looking only. That is the ablation.
+name: SC_v9
+variant: v9
+
+v7:
+  band_weight: 1.0            # [V7]
+  band_lo: 0.4                # [V7]
+  band_hi: 0.6                # [V7]
+  band_above_mode: exp        # [V7]
+  band_decay_k: 6.0           # [V7]
+  band_above_slope: 2.0       # [V7]
+  band_low_weight: 4.0        # [V7]
+  band_depletion: 50.0        # [V7]
+  dE_weight: 2.6              # [TUNED] same as v8; the trend gain moves it in flight
+  gs_weight: 2.0              # [V7]
+  tier_deg: [2.0, 5.0, 10.0]  # [V7]
+  tier_scale: [1.0, 0.5, 0.25]  # [V7]
+  gs_penalty: 0.5             # [V7]
+  feas_weight: 1.0            # [V7]
+  smooth_weight: 0.02         # [V7]
+  omega_weight: 0.002         # [V7]
+  momentum_weight: 0.001      # [V7]
+  thrift_weight: 0.9          # [V7]
+  brownout_weight: 100.0      # [V7]
+  brownout_gen: 1.0           # [V7]
+
+stability:
+  margin_weight: 4.0          # [ASSUME] as v8
+  h_soft_km: 320.0            # [ASSUME]
+  h_floor_km: 250.0           # [V7]
+  decay_stab_weight: 0.6      # [ASSUME]
+  decay_stab_scale: 100.0     # [DERIVED] see reward_v8a.yaml
+  decay_stab_cap: 3.0         # [ASSUME]
+
+# v9 inherits the v8b delegation mechanism unchanged — v9 is a v8b descendant.
+delegation:
+  enabled: true
+  w_power: 6.0                # [ASSUME] as v8b
+  w_accuracy: 2.0             # [ASSUME]
+  kappa: 0.5                  # [ASSUME]
+  p_min: 0.05                 # [ASSUME]
+  p_sig: 0.25                 # [ASSUME]
+  torque_floor_Nm: 1.0e-11    # [ASSUME]
+  # eq. (2) magnitude scale: the torque that turns the craft ~3 deg in one
+  # 300 s step on the X/Y inertia (0.5*(tau/I)*t^2). Alignment magnitude
+  # saturates at 1 above this — "big enough to matter on this timescale",
+  # NOT "rivals the PD demand" (grok critique B3).
+  tau_env_ref_Nm: 1.5e-8      # [DERIVED]
+
+# ---------------------------------------------------------------------------
+# Trend adaptation  (eq. 11-12) — the v9 mechanism
+# ---------------------------------------------------------------------------
+trend:
+  enabled: true
+
+  # A full adverse altitude trend (losing h_ref over the +-600 s window) can at
+  # most add 80 % to the longevity weight. Bounded so the composite cannot be
+  # dominated by one transient.
+  gain_alt: 0.8               # [ASSUME]
+  # A full adverse charge trend can at most double the battery-band weight.
+  gain_soc: 1.0               # [ASSUME]
+
+  h_ref_km: 2.0               # [ASSUME] altitude change that counts as "sharp"
+  soc_ref: 0.2                # [ASSUME] SoC change that counts as "sharp"
+
+# ---------------------------------------------------------------------------
+# Observation layout
+# ---------------------------------------------------------------------------
+observation:
+  # Future block: FP32 propagations of the CURRENT state, attitude held.
+  # 3 offsets x 4 features (d_alt_km, d_sma_km, eclipse_frac, d_soc_est).
+  future_offsets_s: [150.0, 300.0, 600.0]   # [ASSUME] half / one / two commands
+  future: true
+
+  # Past block: stored readings at the same offsets backwards. The IMU and
+  # magnetometer run continuously at 100 Hz for the zero-order hold; only these
+  # three snapshots are retained for the policy.
+  #   v9a: false   v9b: true
+  history: true
+  history_offsets_s: [600.0, 300.0, 150.0]  # [ASSUME] two commands back to half
+  # Per stored sample, 4 features: alt_km/7000, soc, log10 rho, |omega|.
+  history_features: 4

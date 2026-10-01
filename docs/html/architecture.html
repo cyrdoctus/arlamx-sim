@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture & step loop · ARLAMX v2.7</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false})"></script>
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX v2.7 docs</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7<small>spacecraft plant + deep-RL trainer</small></a>
+<h4>Start</h4>
+<a href="../guide/index.html">User guide</a>
+<a href="index.html">Overview</a>
+<a href="install.html">Install, build, test</a>
+<a href="architecture.html" class="active">Architecture & step loop</a>
+<h4>Physics</h4>
+<a href="aerodynamics.html">Free-molecular aerodynamics</a>
+<a href="srp.html">Solar & Earth radiation pressure</a>
+<a href="gravity.html">Gravity harmonics & third body</a>
+<a href="atmosphere.html">Atmosphere & space weather</a>
+<a href="attitude.html">Attitude, control, magnetics</a>
+<a href="geometry.html">Geometry & panel models</a>
+<h4>Deep RL</h4>
+<a href="training.html">Training & sessions</a>
+<a href="environment.html">Gym env, variants, rewards</a>
+<h4>Reference</h4>
+<a href="config.html">Configuration reference</a>
+<a href="api.html">Python / C++ API</a>
+<a href="validation.html">Validation & known limits</a>
+<h4>Plan</h4>
+<a href="plan-cll-materials.html">CLL + material model plan</a>
+</nav>
+<main>
+<h1>Architecture &amp; the step loop</h1>
+<p class="lede">How one RL decision turns into 300 s of integrated orbit and attitude motion, and which module owns each part.</p>
+
+<h2>Repository layout</h2>
+<pre><code>main.py              front door (train, sweep, decay, snapshots, quantize, sim/eval/plot/legacy, run, test, verify)
+cpp/include/arlamx/  headers: types, constants, api, aero/, srp/, orbit/, attitude/, control/, mag/, onboard/
+cpp/src/             implementations + bindings.cpp (pybind11 module arlamx_cpp)
+python/arlamx_v2/    env.py (Gym), physics.py (presets), atmosphere.py (MSIS), geometry.py, train*.py,
+                     session.py (snapshots), sweep.py, reward*.py, sensors.py, estimators.py, power.py,
+                     advisors/ (heuristic, sampling MPC), propagator.py + nav.py (onboard), quantize.py, int8.py
+config/              network.yaml, orbit.yaml, train.yaml, sweep.yaml, sc_v*_6mq*.yaml, plant/*.yaml
+data/                GGM03S, WMM COF, .geom plate models, STL meshes
+tests/               per-module tests + basilisk_ref + integration + validation
+docs/                module notes (docs/modules), handoff notes, this site (docs/html)
+outputs/             snapshots/, models/, results/, .old/ (pre-v2.7 campaigns)</code></pre>
+
+<h2>Who does what</h2>
+<table>
+<thead><tr><th>Concern</th><th>Owner</th><th>Language</th></tr></thead>
+<tbody>
+<tr><td>Orbit + attitude integration, all forces and torques</td><td><code>Simulator::step</code> (<code>cpp/src/api.cpp</code>)</td><td>C++</td></tr>
+<tr><td>Atmosphere density, temperature, mean mass, species</td><td><code>atmosphere.query_msis</code> → <code>Simulator.set_atmosphere[_end]</code></td><td>Python (pymsis)</td></tr>
+<tr><td>Space-weather draws and jumps, SRP flashes, damage events</td><td><code>ArlamxV2Env.reset / _apply_jumps / step</code></td><td>Python</td></tr>
+<tr><td>Physics preset → <code>SimParams</code></td><td><code>physics.apply_to_params</code></td><td>Python</td></tr>
+<tr><td>Observations, reward, power, sensors, torque KF</td><td><code>env.py</code>, <code>reward*.py</code>, <code>sensors.py</code>, <code>estimators.py</code>, <code>power.py</code></td><td>Python</td></tr>
+<tr><td>Onboard forecast (FP32 two-body + J2 + exp. drag + held SRP)</td><td><code>propagator.py</code> ↔ <code>onboard/propagator_f32.cpp</code></td><td>both (mirror)</td></tr>
+<tr><td>Policies</td><td>SB3 (PPO/SAC/TD3), <code>advisors/</code> (heuristic, sampling MPC), <code>duo.py</code></td><td>Python</td></tr>
+</tbody>
+</table>
+
+<h2 id="loop">One env step</h2>
+<figure>
+<svg viewBox="0 0 900 470" role="img" aria-label="Step loop diagram">
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8fb4f0"/></marker></defs>
+<rect x="20" y="20" width="260" height="430" rx="10" fill="#1f2125" stroke="#363a40"/>
+<text x="36" y="46" fill="#9aa0a9" font-size="13" font-weight="600">Python · ArlamxV2Env.step(action)</text>
+<g font-size="12.5" fill="#d8dbe0">
+<rect x="36" y="62" width="228" height="44" rx="6" fill="#2a2d32" stroke="#363a40"/><text x="48" y="80">decode action → q_cmd (4),</text><text x="48" y="97">gates / split / rod on-off</text>
+<rect x="36" y="118" width="228" height="44" rx="6" fill="#2a2d32" stroke="#363a40"/><text x="48" y="136">weather jumps (F10.7, Ap),</text><text x="48" y="153">damage strike, SRP flash scale</text>
+<rect x="36" y="174" width="228" height="62" rx="6" fill="#2a2d32" stroke="#363a40"/><text x="48" y="192">MSIS at geodetic point, t0</text><text x="48" y="209">(+ MSIS at predicted t0+300 s</text><text x="48" y="226">if atmosphere.interp)</text>
+<rect x="36" y="248" width="228" height="44" rx="6" fill="#2a2d32" stroke="#363a40"/><text x="48" y="266">set_atmosphere(ρ,T,m̄,χ)</text><text x="48" y="283">set_atmosphere_end(...)</text>
+<rect x="36" y="360" width="228" height="74" rx="6" fill="#2a2d32" stroke="#363a40"/><text x="48" y="378">power / battery, sensors,</text><text x="48" y="395">torque KF, ground stations,</text><text x="48" y="412">forecast, observation, reward</text><text x="48" y="429" fill="#9aa0a9">→ (obs, r, term, trunc, info)</text>
+</g>
+<rect x="330" y="20" width="550" height="430" rx="10" fill="#1f2125" stroke="#363a40"/>
+<text x="346" y="46" fill="#9aa0a9" font-size="13" font-weight="600">C++ · Simulator::step(q_cmd)   ×1 per env step</text>
+<g font-size="12.5" fill="#d8dbe0">
+<rect x="346" y="62" width="518" height="30" rx="6" fill="#2a2d32" stroke="#363a40"/><text x="358" y="82">slerp-clip q_cmd to max_slew (40–45°) · Sun/Moon for third body once per step</text>
+<rect x="346" y="104" width="518" height="330" rx="8" fill="none" stroke="#3b4d6b" stroke-dasharray="5 4"/>
+<text x="358" y="124" fill="#8fb4f0" font-weight="600">substep loop: nsub = advisor_step_s / dt_s = 300 / 2 = 150</text>
+<rect x="358" y="136" width="494" height="28" rx="5" fill="#2a2d32"/><text x="370" y="155">target σ, ω (inertial or flow frame, optional onboard-nav) · lerp atmosphere</text>
+<rect x="358" y="172" width="240" height="72" rx="5" fill="#2a2d32"/><text x="370" y="192">aero: Sentman | Walker-CLL</text><text x="370" y="209">F_B, τ_B per panel sum</text><text x="370" y="226">+ min-drag baseline C_D</text>
+<rect x="612" y="172" width="240" height="72" rx="5" fill="#2a2d32"/><text x="624" y="192">SRP: optical | cannonball</text><text x="624" y="209">Earth IR + albedo</text><text x="624" y="226">eclipse (cylindrical)</text>
+<rect x="358" y="252" width="240" height="56" rx="5" fill="#2a2d32"/><text x="370" y="272">gravity-gradient torque</text><text x="370" y="289">3μ/r³ û × Iû</text>
+<rect x="612" y="252" width="240" height="56" rx="5" fill="#2a2d32"/><text x="624" y="272">control: PD (MRP|quat) → coils /</text><text x="624" y="289">rods through B (WMM|dipole) | B-dot</text>
+<rect x="358" y="316" width="494" height="44" rx="5" fill="#2a2d32"/><text x="370" y="335">energy book-keeping: dE_actual, dE_baseline, dE_drag, dE_lift, drag_N</text><text x="370" y="352" fill="#9aa0a9">(F·v dt / m, inertial frame)</text>
+<rect x="358" y="368" width="494" height="56" rx="5" fill="#2a2d32"/><text x="370" y="388">RK4 over dt_s in ⌈dt_s / rk4_step_s⌉ steps: ṙ = v, v̇ = a_grav(SH + 3rd body) + C_BNᵀF_B/m,</text><text x="370" y="405">σ̇ = ¼B(σ)ω, ω̇ = I⁻¹(τ − ω×Iω)   (F_B, τ_B held over the substep)</text>
+</g>
+<path d="M264 270 L330 270" stroke="#8fb4f0" stroke-width="1.6" marker-end="url(#ar)"/>
+<path d="M330 420 L264 400" stroke="#8fb4f0" stroke-width="1.6" marker-end="url(#ar)"/>
+<text x="272" y="262" font-size="11" fill="#9aa0a9">step(q)</text>
+<text x="268" y="428" font-size="11" fill="#9aa0a9">StepOut</text>
+</svg>
+<figcaption>One env step is one advisor step: 300 s (150 s for v6), 150 substeps of 2 s, RK4 inside each substep. External forces and torques are evaluated once per substep and held (zero-order hold) across its RK4 stages. Gravity is re-evaluated at every RK4 stage.</figcaption>
+</figure>
+
+<h3>Timing constants</h3>
+<table>
+<thead><tr><th>Quantity</th><th>Default</th><th>Where</th></tr></thead>
+<tbody>
+<tr><td>advisor step (env step)</td><td>300 s (v6: 150 s; override <code>advisor_s</code>)</td><td><code>SimParams.advisor_step_s</code>, env ctor</td></tr>
+<tr><td>substep (force/torque evaluation)</td><td>2 s (override <code>inner_dt</code>)</td><td><code>SimParams.dt_s</code></td></tr>
+<tr><td>RK4 step</td><td>2 s (≤ dt_s)</td><td><code>integrator.rk4_step_s</code></td></tr>
+<tr><td>slew clip per step</td><td>45° (v3), 40° (v4+)</td><td><code>SimParams.max_slew_rad</code></td></tr>
+<tr><td>epoch</td><td>JD 2461060.5 = 2026-01-15 00:00 UTC</td><td><code>env.EPOCH_JD</code>, <code>SimParams.epoch_jd</code></td></tr>
+<tr><td>hard stop</td><td>geodetic altitude &lt; 80 km (plant); env terminal altitudes are per variant</td><td><code>api.cpp</code></td></tr>
+<tr><td>step cost</td><td>≈1.23 ms (v10 standard physics)</td><td>CHANGELOG_v2.7</td></tr>
+</tbody>
+</table>
+
+<h2>Frames</h2>
+<table>
+<thead><tr><th>Frame</th><th>Definition in code</th></tr></thead>
+<tbody>
+<tr><td>N (inertial)</td><td>Earth-centred, z = rotation axis. Earth-fixed is reached by a z-rotation of IAU-1982 GMST (<code>dcm_EN</code>), with no precession, nutation or polar motion. The analytic Sun and Moon are given in the mean equator of date and used as N. SPICE returns J2000 (see <a href="validation.html">limits</a>).</td></tr>
+<tr><td>E (Earth-fixed)</td><td><code>r_E = dcm_EN(gmst) r_N</code>, used for gravity SH, WMM and MSIS longitude</td></tr>
+<tr><td>B (body)</td><td>MRP σ_BN, <code>C_BN = mrp_to_dcm(σ)</code>. Panels, rods and the inertia are in B.</td></tr>
+<tr><td>F (flow)</td><td>e₁ = v_rel, e₃ = orbit normal (or ⟂B for <code>flowB</code>, ⟂Sun for <code>flowS</code>), e₂ = e₃ × e₁. Used when <code>cmd_frame ≠ inertial</code>.</td></tr>
+<tr><td>L (LVLH)</td><td><code>dcm_LN</code>: z = −r̂, y = −ĥ, x = y × z</td></tr>
+</tbody>
+</table>
+
+<h2>StepOut (what <code>Simulator.step</code> returns)</h2>
+<table>
+<thead><tr><th>Key</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>r, v, sigma, omega, t</code></td><td>state at the end of the step (N frame, MRP shadow set, body rates)</td></tr>
+<tr><td><code>altitude_km</code>, <code>sma_m</code></td><td>Bowring geodetic height; vis-viva semi-major axis</td></tr>
+<tr><td><code>eclipse</code>, <code>sun_B</code>, <code>B_B</code></td><td>shadow flag at the end, Sun and field in body axes</td></tr>
+<tr><td><code>Cd</code>, <code>Cl</code></td><td>last-substep coefficients on A_ref (half the total panel area if <code>one_sided_ref</code>)</td></tr>
+<tr><td><code>drag_N</code></td><td>mean along-track drag magnitude (N)</td></tr>
+<tr><td><code>dE_actual</code>, <code>dE_baseline</code>, <code>dE_drag</code>, <code>dE_lift</code></td><td>specific orbital-energy change (J/kg) from aero + SRP + ERP, from the min-drag counterfactual, and the drag and lift parts</td></tr>
+<tr><td><code>tracking_err_rad</code></td><td>mean attitude error to the target</td></tr>
+<tr><td><code>tau_ctrl_mean, tau_aero_mean, tau_srp_mean, tau_erp_mean, tau_gg_mean, tau_env_mean</code></td><td>mean torques (N·m, body)</td></tr>
+<tr><td><code>tau_cmd_mean, tau_demand_mean, tau_demand_absmean, tau_shortfall_frac, m_mean, gyro_mean</code></td><td>controller demand before and after clips, dipole used, magnetic shortfall, gyroscopic term</td></tr>
+<tr><td><code>a_srp_sun</code>, <code>n_sunlit</code></td><td>mean along-track SRP acceleration while lit; count of lit substeps</td></tr>
+<tr><td><code>rod_duty2_mean</code></td><td>per-rod mean of (d/d_max)² × duty (I²R power proxy)</td></tr>
+<tr><td><code>n_substeps</code></td><td>substeps completed (fewer if the 80 km stop fired)</td></tr>
+</tbody>
+</table>
+
+<footer>ARLAMX v2.7 documentation · generated 2026-09-30 from the source tree (cpp/, python/arlamx_v2/, config/). Equations render with KaTeX when online; offline they show as TeX.</footer>
+</main>
+</div>
+</body>
+</html>

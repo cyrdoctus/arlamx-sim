@@ -1,0 +1,66 @@
+# SolarCat / EarthCup sensor error budget.
+#
+# Consumed by arlamx_v2.sensors.SensorConfig.from_yaml(). Every entry mirrors a
+# field of the config dataclasses and carries the same provenance tag:
+#   [SPEC]    lifted from the part datasheet
+#   [ASSUME]  engineering assumption, no measurement behind it yet
+#   [MEASURE] must be characterised on the flight unit before it is trusted
+#
+# Datasheets: TDK InvenSense ICM-42688-P (DS-000347); Memsic MMC5983MA;
+# SkyTraq Orion B16-01.
+#
+# Unknown keys are rejected by the loader, so a typo fails loudly.
+
+enabled: true          # [ASSUME] false => every read returns truth bit-for-bit
+seed: 0                # [ASSUME] base seed; one spawned stream per sensor
+temp_ref_C: 25.0       # [SPEC] temperature the datasheet 'typ' figures are quoted at
+
+# --- TDK ICM-42688-P gyro, SPI, 100 Hz -------------------------------------
+gyro:
+  arw_dps_rthz: 0.0028         # [SPEC] rate noise density, deg/s/sqrt(Hz)
+  turn_on_bias_dps: 0.5        # [SPEC ZRO typ] 1-sigma of the per-run draw, deg/s
+  bias_tempco_dps_per_C: 0.005 # [ASSUME - replace with TVAC data]
+  bias_tempco_poly: []         # [ASSUME - replace with TVAC data] polyval coeffs in (T - T_ref)
+  rrw_dps_per_s_rthz: 1.0e-5   # [MEASURE] rate random walk, deg/s/s/sqrt(Hz)
+  rrw_on_datasheet: false      # [MEASURE] NOT a datasheet number: Allan-fit the flight unit
+  scale_factor_err: 0.005      # [SPEC] 0.5 %, drawn uniform +/- per axis per run
+  misalign_deg: 0.5            # [ASSUME] 1-sigma per axis, fixed per run
+  n_bits: 16                   # [SPEC] ADC width over the selected FS
+  fs_dps: 2000.0               # [SPEC] selected full scale = saturation limit
+
+# --- TDK ICM-42688-P accelerometer -----------------------------------------
+accel:
+  noise_density_ug_rthz: 70.0  # [SPEC] ug/sqrt(Hz)
+  turn_on_bias_mg: 20.0        # [SPEC typ] zero-g offset, 1-sigma of the per-run draw
+  bias_tempco_mg_per_C: 0.15   # [SPEC typ] zero-g offset drift
+  n_bits: 16                   # [SPEC]
+  fs_g: 16.0                   # [SPEC] selected full scale = saturation limit
+
+# --- 2x Memsic MMC5983MA, separate I2C buses, 100 Hz -----------------------
+# Both units share these parameters; the *draws* (noise, hard iron) are
+# independent per unit, which is the entire point of the redundant pair.
+mag:
+  noise_mG_rms: 0.4            # [SPEC] total RMS noise ...
+  noise_bw_hz: 100.0           # [SPEC] ... quoted at this bandwidth
+  lsb_mG: 0.0625               # [SPEC] 18-bit output resolution
+  fs_G: 8.0                    # [SPEC] +/-8 G full scale = saturation limit
+  nonlinearity_pct_fs: 0.1     # [SPEC] INL, % of full scale
+  hard_iron_mG: 20.0           # [ASSUME] 1-sigma per axis, independent draw per unit
+  soft_iron:                   # [ASSUME] identity until a swing test says otherwise
+    - [1.0, 0.0, 0.0]
+    - [0.0, 1.0, 0.0]
+    - [0.0, 0.0, 1.0]
+  sens_tempco_pct_per_C: 0.06  # [ASSUME] sensitivity drift, %/degC
+  dipole_coupling_mG_per_Am2:  # [ASSUME] magnetorquer contamination, mG per A m^2 of command
+    - [0.0, 0.0, 0.0]
+    - [0.0, 0.0, 0.0]
+    - [0.0, 0.0, 0.0]
+
+# --- SkyTraq Orion B16-01 on the ChipSat, UART, 1 Hz -----------------------
+gnss:
+  fix_rate_hz: 1.0             # [SPEC] nominal navigation rate
+  ttff_s: 60.0                 # [ASSUME] conservative cold-start TTFF after each power-on
+  pos_gm_sigma_m: 10.0         # [ASSUME] Gauss-Markov steady-state 1-sigma per axis, m
+  pos_gm_tau_s: 300.0          # [ASSUME] Gauss-Markov correlation time, s
+  pos_white_m: 3.0             # [ASSUME] uncorrelated per-fix position noise, m
+  vel_sigma_ms: 0.1            # [ASSUME] 1-sigma per axis, m/s

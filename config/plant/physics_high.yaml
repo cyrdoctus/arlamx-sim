@@ -1,0 +1,50 @@
+name: high
+
+gravity:
+  model: ggm03s
+  degree: 8
+  lunisolar: true
+  gradient_torque: true  # 3 mu/r^3 u x Iu (Markley & Crassidis 2014, ch. 3)
+
+atmosphere:
+  model: msis21
+  f107: 150.0
+  ap: 4.0
+  corotating: true
+  interp: true           # 2nd MSIS sample at step end, linear in time (criticv1 F11)
+
+aero:
+  gsi: cll
+  # α_E is Sentman-only (ignored when gsi=cll).
+  # α_N is Walker's normal-energy accommodation, a different quantity from
+  # Sentman α_E (Moe & Moe 2005). Walker 2014 Table 2 / ADBSat treat α_N as
+  # a free input the fits are functions of — there is no published "LEO α_N".
+  # 0.93 is an ARLAMX isolation choice: same number as the campaign Sentman
+  # α_E so standard-vs-high isolates the kernel + species mix, not a change
+  # of the accommodation knob. α_N=1 is Schaaf–Chambre = Sentman α_E=1
+  # (about 9% less face-on Cd than Sentman 0.93). Sweep α_N if you need
+  # the sensitivity; do not treat 0.93 as a Walker-derived value.
+  alpha_E: 0.93
+  alpha_n: 0.93
+  alpha_t: 1.0
+  T_w: 300.0
+  one_sided_ref: true
+
+srp:
+  enabled: true
+  optical: true          # plate law along n and s (Montenbruck & Gill 2000, Sec. 3.4)
+  optics: al_mylar       # partition from python/arlamx_v2/sail_optics.py
+  Cr: 1.8                # cannonball law only (optical: false)
+  earth: true            # Earth IR + albedo (Knocke et al. 1988 a0 = 0.34, e0 = 0.68)
+  # Thermal-IR partition of the cell faces: absorptance = emittance 0.85, no
+  # specular part in the IR [ASSUME; cover glass / polyimide 0.7-0.9].
+  ir: {ca: 0.85, cs: 0.0, cd: 0.15}
+
+magnetics:
+  model: wmm
+
+attitude:
+  law: mrp
+
+integrator:
+  rk4_step_s: 2.0

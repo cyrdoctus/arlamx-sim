@@ -1,0 +1,40 @@
+name: check
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Guide pages and links
+        run: python3 tools/check_docs.py
+
+  # Full plant build. Run from the Actions tab. Needs the conda environment
+  # in environment.yml (CPU PyTorch, Stable-Baselines3, pymsis, cascadio).
+  plant:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: environment.yml
+          environment-name: arlamx
+          cache-environment: true
+          init-shell: bash
+      - name: Build the C++ plant
+        shell: bash -el {0}
+        run: |
+          export ARLAMX_PYTHON="$CONDA_PREFIX/bin/python"
+          ./build.sh
+      - name: Test
+        shell: bash -el {0}
+        run: python main.py test

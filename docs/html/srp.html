@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solar & Earth radiation pressure · ARLAMX v2.7</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false})"></script>
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX v2.7 docs</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7<small>spacecraft plant + deep-RL trainer</small></a>
+<h4>Start</h4>
+<a href="../guide/index.html">User guide</a>
+<a href="index.html">Overview</a>
+<a href="install.html">Install, build, test</a>
+<a href="architecture.html">Architecture & step loop</a>
+<h4>Physics</h4>
+<a href="aerodynamics.html">Free-molecular aerodynamics</a>
+<a href="srp.html" class="active">Solar & Earth radiation pressure</a>
+<a href="gravity.html">Gravity harmonics & third body</a>
+<a href="atmosphere.html">Atmosphere & space weather</a>
+<a href="attitude.html">Attitude, control, magnetics</a>
+<a href="geometry.html">Geometry & panel models</a>
+<h4>Deep RL</h4>
+<a href="training.html">Training & sessions</a>
+<a href="environment.html">Gym env, variants, rewards</a>
+<h4>Reference</h4>
+<a href="config.html">Configuration reference</a>
+<a href="api.html">Python / C++ API</a>
+<a href="validation.html">Validation & known limits</a>
+<h4>Plan</h4>
+<a href="plan-cll-materials.html">CLL + material model plan</a>
+</nav>
+<main>
+<h1>Solar &amp; Earth radiation pressure</h1>
+<p class="lede">Attitude-dependent radiation force and moment on the same panel table the aerodynamics uses. It covers direct sunlight, Earth albedo and Earth infrared.</p>
+<p class="small">Source: <code>cpp/src/srp/panel_srp.cpp</code>; presets in <code>python/arlamx_v2/sail_optics.py</code>; switches under <code>srp:</code> in the physics YAML.</p>
+
+<h2>Solar pressure and geometry</h2>
+<div class="eq">\[
+P_\odot=P_\mathrm{SR}\left(\frac{1\,\mathrm{AU}}{d}\right)^2\cdot \texttt{srp\_scale},\qquad P_\mathrm{SR}=4.56\times10^{-6}\ \mathrm{N\,m^{-2}}
+\]</div>
+<ul>
+<li>d comes from the Sun ephemeris: the Astronomical Almanac low-precision series (measured direction error ≤ 0.008° against astropy over one year), or CSPICE when linked. The Sun is re-evaluated every substep.</li>
+<li>Eclipse is <b>cylindrical and binary</b>: lit if r·ŝ ≥ 0 or the perpendicular distance is ≥ R_E. There is no penumbra.</li>
+<li>For each panel, \(\cos\theta=\hat n\cdot\hat s\) (ŝ points toward the Sun in body axes). Only faces with cos θ &gt; 1e-12 contribute, so a two-sided membrane needs both faces in the panel table (the <code>.geom</code> models have them).</li>
+</ul>
+
+<h2>Optical plate law (default since v2.7)</h2>
+<div class="eq">\[
+\mathbf F_i=-P\,A_i\cos\theta_i\Bigl[(c_a+c_d)\,\hat s+\bigl(2c_s\cos\theta_i+\tfrac23c_d\bigr)\hat n_i\Bigr],\qquad
+\boldsymbol\tau=\sum_i\mathbf r_{c,i}\times\mathbf F_i,\qquad c_a+c_s+c_d=1
+\]</div>
+<p>c_a is the absorbed fraction, c_s the specularly reflected fraction and c_d the diffusely (Lambertian) reflected fraction (Montenbruck &amp; Gill §3.4). The code renormalises the three to sum to 1. The normal component is what an SRP sail uses to raise or hold its orbit.</p>
+
+<h3>Presets (<code>srp.optics</code>)</h3>
+<table>
+<thead><tr><th>Name</th><th>c_a</th><th>c_s</th><th>c_d</th><th>Cannonball-equivalent C_r</th></tr></thead>
+<tbody>
+<tr><td><code>absorber</code></td><td>1.00</td><td>0</td><td>0</td><td>1.0</td></tr>
+<tr><td><code>specular</code></td><td>0</td><td>1.00</td><td>0</td><td>2.0</td></tr>
+<tr><td><code>lambert</code></td><td>0</td><td>0</td><td>1.00</td><td>1.0</td></tr>
+<tr><td><code>al_mylar</code> (default)</td><td>0.08</td><td>0.88</td><td>0.04</td><td>1.8</td></tr>
+<tr><td><code>al_kapton</code></td><td>0.12</td><td>0.80</td><td>0.08</td><td>1.7</td></tr>
+<tr><td><code>black_kapton</code></td><td>0.92</td><td>0</td><td>0.08</td><td>1.1</td></tr>
+<tr><td><code>white_paint</code></td><td>0.20</td><td>0.04</td><td>0.76</td><td>1.4</td></tr>
+<tr><td><code>aged_sail</code></td><td>0.35</td><td>0.40</td><td>0.25</td><td>1.5</td></tr>
+<tr><td><code>cannonball_cr18</code></td><td colspan="3">(cannonball law)</td><td>1.8</td></tr>
+</tbody>
+</table>
+<div class="warn"><b>One partition for the whole spacecraft</b>
+The chosen preset applies to every panel, including solar cells, PCB and beams. Per-panel or per-material optics is the main item of the <a href="plan-cll-materials.html">plan</a>.</div>
+
+<h2>Cannonball law (<code>srp.optical: false</code>)</h2>
+<div class="eq">\[
+\mathbf F=\sum_{\hat n\cdot\hat s>0}P\,C_r\,A\,(\hat n\cdot\hat s)(-\hat s)
+\]</div>
+<p>This is the V1.7 law. The force is along −ŝ only, with no lift component. It is kept for C_r = 1 classroom checks and for comparison with old campaigns (every pre-v2.7 campaign flew cannonball with no moment and no 1/d²).</p>
+
+<h2>Earth radiation (<code>srp.earth: true</code>)</h2>
+<div class="eq">\[
+P_\mathrm{IR}=P_\mathrm{SR}\frac{e_0}{4}\Bigl(\frac{R_E}{r}\Bigr)^2,\qquad
+P_\mathrm{alb}=P_\odot\,a_0\Bigl(\frac{R_E}{r}\Bigr)^2\max(0,\hat r\cdot\hat s),\qquad a_0=0.34,\ e_0=0.68
+\]</div>
+<ul>
+<li>Both use the plate law with the source direction at nadir. IR uses the thermal partition <code>srp.ir</code> (default c_a 0.85, c_s 0, c_d 0.15 [ASSUME]). Albedo uses the solar partition.</li>
+<li>IR is on day and night; albedo only on the day side. Constants are zonal means (Knocke, Ries &amp; Tapley 1988).</li>
+<li>(R_E/r)² is the view factor of a plate facing the Earth's centre. Tilted plates use the same point-source direction, which is an approximation for plates near edge-on to nadir.</li>
+</ul>
+
+<h2>SRP “flashes” (training stressor, not physics)</h2>
+<p>In variants v5+, the env draws 1–3 events per episode that multiply <code>srp_scale</code> by 2–6 for 3 steps, only above 450 km. They are there to make policies robust and are not a physical SRP model (real solar irradiance varies by about 0.1 %). Turn them off for physics studies by using a variant below v5 or by running the plant directly.</p>
+
+<h2>Configuration</h2>
+<table>
+<thead><tr><th>YAML</th><th>SimParams</th><th>Default (standard)</th></tr></thead>
+<tbody>
+<tr><td><code>srp.enabled</code></td><td><code>use_panel_srp</code></td><td>true (required key)</td></tr>
+<tr><td><code>srp.optical</code></td><td><code>srp_optical</code></td><td>true</td></tr>
+<tr><td><code>srp.optics</code></td><td><code>srp_ca, srp_cs, srp_cd</code></td><td>al_mylar</td></tr>
+<tr><td><code>srp.Cr</code></td><td><code>Cr</code></td><td>1.8 (cannonball only)</td></tr>
+<tr><td><code>srp.earth</code></td><td><code>earth_rad</code></td><td>true</td></tr>
+<tr><td><code>srp.ir: {ca, cs, cd}</code></td><td><code>ir_ca, ir_cs, ir_cd</code></td><td>0.85 / 0 / 0.15</td></tr>
+<tr><td>—</td><td><code>srp_scale</code> / <code>set_srp_scale</code></td><td>1.0 (0–20)</td></tr>
+</tbody>
+</table>
+
+<h2>What is not modelled</h2>
+<ul>
+<li><b>Thermal re-emission force.</b> Absorbed power re-radiated from front and back faces with different emissivities produces a normal force \(\propto c_a\frac{\varepsilon_fB_f-\varepsilon_bB_b}{\varepsilon_f+\varepsilon_b}\) (McInnes 1999). For aluminised sail films (ε_f ≈ 0.03, ε_b ≈ 0.6) this is a few percent of the normal force, and it is included in the plan.</li>
+<li>Penumbra (≈ 8–10 s per LEO shadow crossing). A conical shadow model (Montenbruck &amp; Gill §3.4.2) would remove the step discontinuity.</li>
+<li>Self-shadowing between panels, multiple reflections, wavelength-dependent optics, and ageing (UV/AO degradation of c_s).</li>
+<li>Per-panel materials. Each panel should carry its own (c_a, c_s, c_d), front and back, in both the solar and the IR band.</li>
+</ul>
+
+<h2>Validation</h2>
+<ul>
+<li><code>tests/srp/test_srp.py</code>, <code>test_srp_optical.py</code>: 1 m² face-on C_r = 1 gives |F| = P_SR; a 90° plate gives 0; box symmetry.</li>
+<li><code>tests/physics/test_disturbances.py</code>: moment = r × F (1 cm offset → 0.01 P), face-on hex mylar 5.692 µN, 1/d² series, IR pushes a nadir plate outward in eclipse, albedo day-side only.</li>
+</ul>
+<h2>References</h2>
+<ol class="small">
+<li>Montenbruck, O. &amp; Gill, E. (2000). <i>Satellite Orbits.</i> Springer, §3.4.</li>
+<li>Vallado, D. A. (2013). <i>Fundamentals of Astrodynamics and Applications</i>, 4th ed., §8.6.4, Alg. 29.</li>
+<li>McInnes, C. R. (1999). <i>Solar Sailing.</i> Springer.</li>
+<li>Knocke, P. C., Ries, J. C. &amp; Tapley, B. D. (1988). Earth radiation pressure effects on satellites. AIAA 88-4292.</li>
+</ol>
+
+<footer>ARLAMX v2.7 documentation · generated 2026-09-30 from the source tree (cpp/, python/arlamx_v2/, config/). Equations render with KaTeX when online; offline they show as TeX.</footer>
+</main>
+</div>
+</body>
+</html>

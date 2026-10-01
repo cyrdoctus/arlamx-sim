@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overview · ARLAMX</title>
+<link rel="stylesheet" href="../html/assets/style.css">
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX guide</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7.5<small>user guide</small></a>
+<h4>Guide</h4>
+<a href="index.html" class="active">Overview</a>
+<a href="commands.html">Commands</a>
+<a href="fmf.html">Free-molecular flow</a>
+<a href="control.html">Control loop and deep RL</a>
+<a href="simplify.html">STL simplification</a>
+<a href="libraries.html">Python libraries</a>
+<h4>Also</h4>
+<a href="../index.html">Docs home</a>
+<a href="../html/index.html">Physics reference</a>
+</nav>
+<main>
+<h1>User guide</h1>
+<p class="lede">ARLAMX flies a spacecraft in software. A C++ plant integrates the orbit and the attitude. Python loads the geometry, the atmosphere, and, when you want one, a neural network that chooses the attitude.</p>
+
+<h2>Three jobs, one plant</h2>
+<div class="grid">
+<div class="card"><h3><a href="fmf.html">Free-molecular flow</a></h3><p class="small">Give it a plate model of a spacecraft. It sums Sentman (or Walker–CLL) force and torque, plus solar and Earth radiation pressure, and can integrate the orbit down until a stop altitude. The attitude can be held at minimum drag, maximum drag, or a fixed angle of attack.</p></div>
+<div class="card"><h3><a href="control.html">Onboard control loop</a></h3><p class="small">An outer advisor picks a target quaternion every 300 seconds. An inner MRP or quaternion law tracks it every 2 seconds, through magnetorquers or torque rods. The advisor can be a script, a sampling MPC, or a trained network.</p></div>
+<div class="card"><h3><a href="control.html#train">Deep RL</a></h3><p class="small">Stable-Baselines3 PPO, SAC, or TD3 train that outer advisor inside a Gymnasium environment. The default network is 4×16. Training stays FP32. <code>quantize</code> writes an INT8 actor afterwards.</p></div>
+</div>
+
+<h2>Build once</h2>
+<pre><code>mamba env create -n arlamx -f environment.yml
+mamba activate arlamx
+./build.sh
+python main.py test</code></pre>
+<p>Use Python 3.12. <code>./build.sh</code> writes <code>python/arlamx_v2/arlamx_cpp*.so</code>. That file is gitignored, so a fresh clone needs this step. Details and the library list are on the <a href="libraries.html">libraries</a> page.</p>
+
+<h2>Then one of these</h2>
+<pre><code>python main.py list                                      <span class="c"># every command</span>
+python main.py decay                                     <span class="c"># hex sail, min and max drag</span>
+python main.py sim geometry --in craft.stl --quality 1pct
+python main.py train --network config/network_quick.yaml <span class="c"># short training run</span></code></pre>
+<p>The <a href="commands.html">commands</a> page is the map. Every flag is also in <code>docs/notes/commands.md</code>.</p>
+
+<div class="note"><b>What the plant contains</b>
+Free-molecular aerodynamics on flat plates, an optical solar-pressure plate law with Earth infrared and albedo, GGM03S gravity through degree 70 (training presets use 2, 4, or 8), Sun and Moon point masses, the World Magnetic Model, and NRLMSIS atmosphere from Python. Plates do not shadow each other, in flow or in sunlight.</div>
+
+<footer>ARLAMX v2.7.5 user guide · dark theme, works offline.</footer>
+</main>
+</div>
+</body>
+</html>

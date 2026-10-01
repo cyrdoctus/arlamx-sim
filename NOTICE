@@ -1,0 +1,44 @@
+ARLAMX
+Copyright (c) 2026 nekolny
+
+ARLAMX is released under the MIT License. The license text is the file
+LICENSE. A copy or a substantial portion of the software must keep that
+copyright notice and the permission notice. That is the attribution the
+license requires: name the original copyright holder when you redistribute
+or modify the code.
+
+Replace the name "nekolny" in LICENSE and in this file with a legal name
+before a public release if that is the name you want cited.
+
+Spherical harmonics
+-------------------
+cpp/include/arlamx/orbit/gravity.hpp and cpp/src/orbit/gravity.cpp evaluate
+the standard spherical-harmonic geopotential (Montenbruck & Gill; Holmes &
+Featherstone) on GRACE GGM03S coefficients. They are an independent
+implementation. They do not include Basilisk source and the plant does not
+link Basilisk.
+
+The reference model for those segments is:
+
+  SphericalHarmonicsGravityModel
+  Basilisk
+  Autonomous Vehicle Systems Laboratory
+  University of Colorado Boulder
+  https://github.com/AVSLab/basilisk
+  License: ISC
+  Copyright (c) Autonomous Vehicle Systems Lab,
+  University of Colorado at Boulder
+
+Cite Basilisk when you reuse those segments or when you publish a result
+that depends on them. The comparison lives in tests/basilisk_ref/.
+
+Third-party data, not covered by the MIT license
+-------------------------------------------------
+data/GGM03S.txt is a GRACE gravity model from the Center for Space Research
+at The University of Texas at Austin / NASA. data/WMM.COF and data/WMM2025.COF
+are World Magnetic Model coefficients from NOAA, the NGA, and the BGS.
+Those files keep the terms of their authors.
+
+AI assistance
+-------------
+See AI_USE.md.

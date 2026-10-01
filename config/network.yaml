@@ -1,0 +1,37 @@
+algo: ppo            # ppo | sac | td3
+layers: 4
+width: 16
+timesteps: 300000
+n_envs: 32
+seed: 42
+torch_threads: 0     # 0 = torch default
+
+ppo:
+  learning_rate: 3.0e-4
+  n_steps: 128
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  ent_coef: 0.003
+  clip_range: 0.2
+  gae_lambda: 0.95
+
+sac:
+  learning_rate: 3.0e-4
+  buffer_size: 100000
+  batch_size: 256
+  gamma: 0.99
+  tau: 0.005
+
+td3:
+  learning_rate: 3.0e-4
+  buffer_size: 100000
+  batch_size: 256
+  gamma: 0.99
+  tau: 0.005
+
+vecnormalize:
+  norm_obs: false
+  norm_reward: true
+  clip_reward: 10.0
+  gamma: 0.99

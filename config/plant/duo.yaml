@@ -1,0 +1,100 @@
+# SC_v8Duo — dual-advisor architecture.
+#
+# Two policies, then a deterministic arbiter. No learning in the arbiter.
+#
+#   main advisor      : the v8b policy, full sensor observation, proposes q_main
+#   horizon advisor   : sees NO sensors. It sees the FP32 propagation of the
+#                       current state plus q_main (not yet applied), and asks
+#                       "if q_main is frozen for `horizon_s`, where do we end
+#                       up?" It proposes q_horizon.
+#   arbiter           : propagates BOTH candidates `arbiter_horizon_s` ahead and
+#                       picks one by the rules below.
+#
+# The horizon advisor is deliberately blind to the sensors: its job is not to
+# re-estimate the present, it is to think about the consequence of the present
+# command. Giving it the same observation as the main advisor would just make it
+# a second copy of the main advisor.
+name: SC_v8Duo
+
+# ---------------------------------------------------------------------------
+# Horizon advisor
+# ---------------------------------------------------------------------------
+horizon:
+  horizon_s: 21600.0          # [ASSUME] 6 h — the user-specified planning window
+  # [DERIVED] FP32 RK4 step. Measured against a dt=10 s reference over 6 h:
+  #   dt=20 s -> 34 m decay error, 46 ms | dt=60 s -> 46 m, 15 ms | dt=120 s -> 341 m, 8 ms
+  # 60 s is 1.2 % of the 3.7 km horizon decay for 15 ms of flight compute, and
+  # this runs once per 300 s decision.
+  prop_dt_s: 60.0
+  # Coarse stride for the eclipse-fraction sweep, reusing the same propagation.
+  eclipse_stride: 5           # [ASSUME] sample shadow every 5th propagator step
+  # Observation for the horizon advisor (18 dims, all derived, no raw sensors):
+  #   [0:3]   r_hat at t0                     [3:6]   v_hat at t0
+  #   [6]     altitude / 7000 km              [7]     sma drift over horizon / 10 km
+  #   [8]     decay rate under q_main, km/d / 10
+  #   [9]     soc now                         [10]    soc at horizon under q_main
+  #   [11]    eclipse fraction over horizon
+  #   [12:16] q_main (the not-yet-applied command)
+  #   [16]    log10 rho at t0                 [17]    normalised f10.7 proxy
+  obs_dim: 18
+  act_dim: 4                  # quaternion only — it does not gate actuators
+
+# ---------------------------------------------------------------------------
+# Arbiter — deterministic, weighted, with hard overrides
+# ---------------------------------------------------------------------------
+arbiter:
+  arbiter_horizon_s: 600.0    # [ASSUME] two advisor commands ahead (2 x 300 s)
+  prop_dt_s: 20.0             # [ASSUME]
+
+  # Hard overrides, checked in this order before any weighting.
+  soc_critical: 0.40          # [ASSUME] below this, take the higher-power option
+  soc_comfortable: 0.60       # [ASSUME] above this, prefer the downlink option
+  # Decay emergency: if one candidate's propagated decay exceeds the other by
+  # more than this, take the lower-decay one regardless of everything else.
+  decay_override_km_d: 6.0    # [ASSUME]
+
+  # Weighted score when no override fires. Each term is normalised to [0,1]
+  # across the two candidates, then:
+  #     score = w_decay * (1 - decay_norm)
+  #           + w_power * power_norm
+  #           + w_downlink * downlink_norm
+  # Highest score wins; ties go to the main advisor (stability preference).
+  w_decay: 0.45               # [ASSUME]
+  w_power: 0.35               # [ASSUME]
+  w_downlink: 0.20            # [ASSUME]
+
+  # Feasibility gate applied to both candidates before scoring: a candidate more
+  # than this far from the current attitude cannot be reached inside one advisor
+  # step at the slew cap, so it is rejected rather than commanded and missed.
+  max_slew_deg: 40.0          # [V7] matches the plant's slerp clip
+  # Preference for continuity: the main advisor wins a tie and also wins when the
+  # horizon advisor's advantage is below this margin, to stop the pair
+  # oscillating between two similar attitudes.
+  switch_margin: 0.05         # [ASSUME]
+
+# ---------------------------------------------------------------------------
+# Reward for the horizon advisor (compose_duo_secondary in reward_v8.py)
+# ---------------------------------------------------------------------------
+duo_secondary:
+  decay_ref_km_d: 10.0        # [ASSUME] normaliser, ~the v7 MPC nominal decay
+  soc_ref: 0.5                # [ASSUME] mid-band
+
+  w_decay: 3.0                # [ASSUME] absolute decay over the horizon
+  w_power: 2.0                # [ASSUME] charge lost over the horizon
+  # The point of the whole advisor: it is paid for BEATING the main advisor's
+  # propagated decay, not for low decay in absolute terms. Largest weight.
+  w_improve: 6.0              # [ASSUME]
+  w_slew: 0.5                 # [ASSUME] discourages large detours for small gain
+
+# ---------------------------------------------------------------------------
+# Which trained models fill the two slots. Chosen from the v8 size sweep by the
+# rules below, NOT hand-picked — pick_duo_models() in duo.py applies them.
+# ---------------------------------------------------------------------------
+selection:
+  # Main slot: best longevity behaviour = lowest median decay_nominal among the
+  # v8b arm, subject to zero brownouts.
+  main_metric: decay_nominal
+  main_require_zero_brownouts: true
+  # Secondary slot: most accurate delegation decision-maker = highest median
+  # delegation alignment B (reward_v8.delegation_benefit) over the probe suite.
+  secondary_metric: deleg_benefit

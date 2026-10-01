@@ -1,0 +1,136 @@
+# SC_v11 — v10 plus STRUCTURAL-DAMAGE ADAPTABILITY.
+# Starts from the FROZEN v10 reward (burn-in rounds r0-r2) and adds:
+#   * random membrane damage mid-episode (hole / tear / multiple holes) in a
+#     fraction of training environments, on top of the random storms
+#   * a consistency term holding the damaged craft to its own pre-strike
+#     tracking behaviour
+#   * a delegation-hold bonus for still using environmental torque correctly
+#     on the wounded vehicle whose torque signature changed under the policy
+#   * QUADRUPLE episodes (160 orbits): the strike and the after both need room
+#
+# The damage physics (damage.py): a tear removes up to ~11 % of the membrane
+# and walks the centre of pressure by up to 3.4 cm — 3x the offset the coils
+# were balanced for — so the disturbance the policy trained on can triple and
+# change direction at the strike.
+#
+# ITERATED FILE — FROZEN after burn-in round r2 (2026-08-21).
+# Tuning history (3 seeds x 40k each, medians, outputs/v8/v10_tune.csv):
+#   r0: TUNE-0 base gap 1.664 -> dE 2.6 gap 0.921 (45 % better, band 26.8 %);
+#       KF sigma_drive 1e-9 had the best tracking but did not survive r1.
+#   r1: every fast-KF combination lost to the r0 winner; band_weight 2.0
+#       caused 12 brownouts. KF stays at 3e-10.
+#   r2: power_drop 4.0 / smooth 0.2+thrift 2.0 / gs 2.8 all collapsed the
+#       band the winner holds. THIS FILE as-is is the confirmed optimum of
+#       13 candidates. The remaining distance to the 1.10x-MPC decay target
+#       is a budget question (40k burn-ins sit at 2.6x; 300k-class runs
+#       historically reach ~1.4x), not a shaping one.
+# Every trained run freezes its resolved copy in snapshot.json.
+#
+# Tags: [V7]/[V8]/[V9] inherited · [TUNE-0] initial v10 guess, burn-in adjusts
+name: SC_v11
+variant: v11
+
+v7:
+  band_weight: 1.0            # [V8]
+  band_lo: 0.4                # [V7]
+  band_hi: 0.6                # [V7]
+  band_above_mode: exp        # [V7]
+  band_decay_k: 6.0           # [V7]
+  band_above_slope: 2.0       # [V7]
+  band_low_weight: 4.0        # [V7]
+  band_depletion: 50.0        # [V7]
+  # [TUNE-1] Burn-in round r0 (3 seeds x 40k, medians): dE 2.6 beat both the
+  # TUNE-0 3.2 (gap 0.92 vs 1.66) and 4.0 (1.36), with the best battery band
+  # (26.8 %). Same lesson as v7: pushing the longevity WEIGHT harder trades
+  # battery for drag and loses overall — the 10 % target has to come from
+  # budget and shaping, not from shouting.
+  dE_weight: 2.6
+  gs_weight: 2.4              # [TUNE-0] "best ground coverage" — up from 2.0
+  tier_deg: [2.0, 5.0, 10.0]  # [V7]
+  tier_scale: [1.0, 0.5, 0.25]  # [V7]
+  gs_penalty: 0.5             # [V7]
+  feas_weight: 1.0            # [V7]
+  # Gradual control: action changes are charged 5x the v8 rate...
+  smooth_weight: 0.10         # [TUNE-0] was 0.02
+  omega_weight: 0.002         # [V7]
+  momentum_weight: 0.001      # [V7]
+  # ...and magnetorquer duty (linear) 1.7x the v8 rate.
+  thrift_weight: 1.5          # [TUNE-0] was 0.9
+  brownout_weight: 100.0      # [V7]
+  brownout_gen: 1.0           # [V7]
+
+stability:
+  margin_weight: 4.0          # [V8]
+  h_soft_km: 320.0            # [V8]
+  h_floor_km: 250.0           # [V7]
+  decay_stab_weight: 0.6      # [V8]
+  decay_stab_scale: 100.0     # [V8, DERIVED]
+  decay_stab_cap: 3.0         # [V8]
+  # NEW (v10): big single-step charge losses are charged; ordinary eclipse
+  # discharge (~1-2 %/step) passes free through the threshold.
+  power_drop_weight: 2.0      # [TUNE-0]
+  power_drop_thresh: 0.02     # [TUNE-0] SoC per 300 s step
+  power_drop_scale: 0.05      # [TUNE-0]
+  power_drop_cap: 3.0         # [TUNE-0]
+
+# Perturbation-first: delegation is pushed harder than v8b, and the v8
+# campaign's one clear lesson is applied — w_accuracy was too weak (2.0 vs
+# w_power 6.0), so policies farmed the saving while delegating in the wrong
+# direction (median B < 0). Accuracy now carries equal weight.
+delegation:
+  enabled: true
+  w_power: 6.0                # [V8]
+  w_accuracy: 6.0             # [TUNE-0] was 2.0 — the v8 campaign lesson
+  kappa: 0.7                  # [TUNE-0] was 0.5 — correct delegation boosts more
+  p_min: 0.05                 # [V8]
+  p_sig: 0.25                 # [V8]
+  torque_floor_Nm: 1.0e-11    # [V8]
+  tau_env_ref_Nm: 1.5e-8      # [V8, DERIVED]
+
+trend:
+  enabled: true
+  gain_alt: 0.8               # [V9]
+  gain_soc: 1.0               # [V9]
+  h_ref_km: 2.0               # [V9]
+  soc_ref: 0.2                # [V9]
+
+# Filter tuning rides with the reward config so the KF variant is frozen into
+# the same snapshot as the run (the env overlays these on estimator_kf.yaml).
+# Burn-in round 0 compares sigma_drive {1e-10, 3e-10, 1e-9} on the storm probe.
+kf:
+  sigma_drive: 3.0e-10        # [TUNE-0] v8 value; candidates swept in burn-in
+
+# Observation layout: v9d (6 past / 6 future) — the v9c/v9d readout's winner by
+# best run (v9d SAC 4x32 300k, gap 0.387 vs v9c 0.515 and v9b 0.463). Caveat
+# recorded in the campaign report: v9c had the better MEDIAN (1.20 vs 1.64),
+# so v10 leans on multi-seed burn-ins and winner replication to manage the
+# variance that comes with the richer observation.
+observation:
+  future_offsets_s: [150.0, 300.0, 450.0, 600.0, 750.0, 900.0]
+  future: true
+  history: true
+  history_offsets_s: [900.0, 750.0, 600.0, 450.0, 300.0, 150.0]
+  history_features: 4
+
+# ---------------------------------------------------------------------------
+# v11: structural damage schedule (training draw; probes force kind/step)
+# ---------------------------------------------------------------------------
+damage:
+  prob: 0.6                   # [TUNE-0] fraction of episodes with a strike
+  step_frac_lo: 0.15          # [ASSUME] strike window inside the episode
+  step_frac_hi: 0.70
+
+# ---------------------------------------------------------------------------
+# v11: adaptability terms (reward_v8.adapt_*)
+# ---------------------------------------------------------------------------
+adapt:
+  enabled: true
+  # [TUNE-1] Burn-in round a0 (3 seeds x 40k, medians): 4.0/4.0 cut the gap
+  # from 3.33 (TUNE-0 base, ELEVEN brownouts) to 1.22 with zero brownouts —
+  # the strong adaptability terms are what keeps training stable when the
+  # vehicle changes under the policy. 1.0/1.0 landed at 1.31; damage prob
+  # 0.85 hurt (1.50) so 0.6 stands.
+  w_consistency: 4.0
+  track_scale_rad: 0.10       # [ASSUME] ~6 deg of excess error = full unit
+  track_cap: 3.0              # [ASSUME]
+  w_deleg_hold: 4.0           # [TUNE-1]

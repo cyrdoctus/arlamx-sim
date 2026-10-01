@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Validation & known limits · ARLAMX v2.7</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false})"></script>
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX v2.7 docs</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7<small>spacecraft plant + deep-RL trainer</small></a>
+<h4>Start</h4>
+<a href="../guide/index.html">User guide</a>
+<a href="index.html">Overview</a>
+<a href="install.html">Install, build, test</a>
+<a href="architecture.html">Architecture & step loop</a>
+<h4>Physics</h4>
+<a href="aerodynamics.html">Free-molecular aerodynamics</a>
+<a href="srp.html">Solar & Earth radiation pressure</a>
+<a href="gravity.html">Gravity harmonics & third body</a>
+<a href="atmosphere.html">Atmosphere & space weather</a>
+<a href="attitude.html">Attitude, control, magnetics</a>
+<a href="geometry.html">Geometry & panel models</a>
+<h4>Deep RL</h4>
+<a href="training.html">Training & sessions</a>
+<a href="environment.html">Gym env, variants, rewards</a>
+<h4>Reference</h4>
+<a href="config.html">Configuration reference</a>
+<a href="api.html">Python / C++ API</a>
+<a href="validation.html" class="active">Validation & known limits</a>
+<h4>Plan</h4>
+<a href="plan-cll-materials.html">CLL + material model plan</a>
+</nav>
+<main>
+<h1>Validation &amp; known limits</h1>
+<p class="lede">What is proven, how, and every accuracy issue found while writing this documentation. The limits are ranked by how much they matter for a drag/SRP sail in 250–500 km.</p>
+
+<h2>Evidence</h2>
+<ul>
+<li><b>Test suite:</b> 268 passed (2026-09-30, ThesisMS env, Basilisk referee included).</li>
+<li><b>Independent verify:</b> <code>python main.py verify</code> cross-checks each kernel with scipy quadrature, finite differences or textbook values (<code>tests/validation/verify_physics.py</code>). Hostile-input checks are in <code>tests/validation/hostile_inputs.py</code>.</li>
+<li><b>Basilisk referee:</b> SH gravity vs Basilisk <code>computeField</code>.</li>
+<li><b>Audit trail:</b> <code>docs/notes/ACEnv/Reports/verify_*.md</code>, <code>validate_pass1–4.md</code>, <code>docs/notes/criticv1.md</code> (the F1–F11 critic pass fixed in v2.7), <code>docs/VALIDATION_STANDARD.md</code>.</li>
+<li><b>Behaviour fingerprints:</b> v2.7 restructure verified bit-identical to v2.6 (36 fingerprints) before the critic-pass physics changes.</li>
+</ul>
+
+<h2>Measured during this pass</h2>
+<table>
+<thead><tr><th>Check</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>Analytic Sun direction vs astropy (TETE), 40 epochs 2026</td><td>max 0.008°</td></tr>
+<tr><td>Analytic Moon vs astropy (TETE), 40 epochs 2026</td><td>direction 0.25° mean / 0.44° max; distance up to ≈ 3000 km</td></tr>
+<tr><td>Walker-CLL vs exact CLL kernel (scratch quadrature), single plate s = 8</td><td>face-on ≤ 0.02 %; 45° ≤ 0.8 %; 80° up to −11 % (α_N 0.99)</td></tr>
+<tr><td>Same, whole SolarCat_v3 (176 plates), edge-on / 20° / face-on</td><td>≤ 0.3 % in C_D</td></tr>
+<tr><td>SolarCat C_D sensitivity to σ_T (α_N 0.93): σ_T 1 → 0.7</td><td>edge-on 0.387 → 0.262 (−32 %), face-on 2.214 → 2.145</td></tr>
+<tr><td>SolarCat face-on C_D vs α_N (Walker): 1.0 / 0.93 / 0.7 / 0.5</td><td>1.88 / 2.21 / 2.67 / 2.94</td></tr>
+</tbody>
+</table>
+
+<h2>Known limits, ranked</h2>
+<table>
+<thead><tr><th>#</th><th>Issue</th><th>Impact</th><th>Fix size</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><b>No per-panel materials.</b> One (α_E | α_N, σ_T, T_w) and one (c_a, c_s, c_d) for the whole vehicle.</td><td><span class="tag gap">high</span> Accommodation moves C_D by 30 % or more. Optics set the SRP lift/normal split.</td><td>see <a href="plan-cll-materials.html">plan</a></td></tr>
+<tr><td>2</td><td><b>Ephemeris file not wired:</b> no CSPICE in the build, no YAML key, <code>load_spice</code> never called. The Moon is analytic (0.44° / 3000 km).</td><td><span class="tag partial">low</span> for dynamics (≈ 3e-8 m/s²); a gap versus the requirement</td><td>½–1 day: CMake + <code>ephemeris.kernels</code> YAML + env call + test</td></tr>
+<tr><td>3</td><td><b>WMM-2020 used at a 2026 epoch</b> (WMM2025.COF is present but not the default).</td><td><span class="tag partial">medium</span> for magnetorquer authority and B-aligned modes</td><td>1 line in <code>paths.py</code> or set <code>ARLAMX_WMM</code></td></tr>
+<tr><td>4</td><td><b>Space weather is synthetic:</b> uniform draws + step jumps; F10.7a = F10.7; scalar Ap only; F10.7 floor 5 sfu.</td><td><span class="tag partial">medium</span> Density correlations and storm dynamics are unrealistic. Fine as domain randomisation.</td><td>1–2 days (SW-All.csv replay)</td></tr>
+<tr><td>5</td><td><b>No self-shadowing or flow shielding</b> between panels.</td><td><span class="tag partial">medium</span> for concave shapes (SolarCat petals + PCB), negligible for flat membranes</td><td>4–6 days (precomputed visibility maps)</td></tr>
+<tr><td>6</td><td><b><code>alpha_t</code> is σ_T</b> (momentum), while CLL papers quote α_t (energy): σ_T = 1 − √(1 − α_t).</td><td><span class="tag partial">medium</span> if literature values are pasted in directly</td><td>docs + rename, or convert in the loader</td></tr>
+<tr><td>7</td><td><b>No thermal re-emission SRP force</b>, and T_w is a constant 300 K.</td><td><span class="tag partial">low–medium</span> A few % of the normal SRP force on metallised films.</td><td>in plan (phase 5)</td></tr>
+<tr><td>8</td><td><b>Cylindrical, binary eclipse</b> (no penumbra).</td><td><span class="tag info">low</span> ≈ 8–10 s ramp missing per crossing; step discontinuity in the reward signal.</td><td>½ day (conical model)</td></tr>
+<tr><td>9</td><td><b>SPICE time and frame:</b> UTC JD used as TDB (≈ 69 s); J2000 vs the of-date plant frame (≈ 0.36°).</td><td><span class="tag info">low</span> Matters only once SPICE is on.</td><td>½ day (<code>str2et</code>/ΔT + precession or ITRF via PCK)</td></tr>
+<tr><td>10</td><td><b>Walker-CLL fit error at grazing incidence</b> with α_N → 1.</td><td><span class="tag info">low</span> on a whole vehicle (≤ 0.3 %), up to 11 % per plate</td><td>exact kernel (plan phase 3)</td></tr>
+<tr><td>11</td><td><b>SRP flashes (×2–6)</b> and weather jumps are training stressors, not physics.</td><td><span class="tag info">info</span> Exclude them from physics studies.</td><td>—</td></tr>
+<tr><td>12</td><td><b>MSIS failure fallback</b> switches to a constant atmosphere for the rest of the process (with one warning).</td><td><span class="tag info">low</span> Could silently corrupt a long run.</td><td>make it raise in training</td></tr>
+<tr><td>13</td><td><b>Earth orientation is GMST-only</b> (no precession, nutation or polar motion). SH gravity is evaluated with fully normalised Legendre functions through degree 70. Training presets stay at 2, 4 and 8.</td><td><span class="tag info">negligible</span> for this vehicle class</td><td>—</td></tr>
+<tr><td>14</td><td><b>Earth radiation</b> uses a point-source view factor for tilted plates, and zonal-mean a₀/e₀.</td><td><span class="tag info">low</span></td><td>Knocke latitude-dependent a₀/e₀ + ring integration: 1–2 days</td></tr>
+<tr><td>15</td><td><b>Sentman α_E closure</b> omits the incident thermal energy term.</td><td><span class="tag info">negligible</span> (≈ 0.2 % C_p)</td><td>—</td></tr>
+<tr><td>16</td><td><b>Policy observes truth</b> for r, v, ω, B.</td><td><span class="tag info">design choice</span> Not flight-representative on the input side.</td><td>sensor-in-the-loop observations</td></tr>
+</tbody>
+</table>
+<p class="small">None of these were fixed in this pass. You asked for documentation and a plan only.</p>
+
+<footer>ARLAMX v2.7 documentation · generated 2026-09-30 from the source tree (cpp/, python/arlamx_v2/, config/). Equations render with KaTeX when online; offline they show as TeX.</footer>
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,22 @@
+# SolarCat_v3 for SC_v2_6mq: 7 cm static margin on the min-drag axis (weathervane-stable min drag).
+name: solarcat_v3_6rod_margin7
+geom: SolarCat_v3_1pct_plates.geom
+mass_kg:
+  pcb_battery: 0.080     # [USER] 80 g, placed at the leading vertex (pcb_pos_m)
+  rods: 0.170            # [USER] six rods, one per beam
+  structure: 0.4688      # [USER] 500 g less the 31.2 g trim (total stays 0.750 kg)
+beam_share: 0.104        # [ASSUME] beam share of the structure (hex_v3 area share)
+membrane_radius_m: 0.512 # STL: 1.024 m corner to corner
+beam_length_m: 0.512     # hexagon side = circumradius
+beam_apothem_m: 0.440    # STL flat-to-flat 0.890 m, beam midline just inside the edge
+beam_angle0_deg: 30.0    # STL vertices on body X, side midpoints at 30 + 60 k deg
+cp_offset_m: [0.035, 0.0606218, 0.0]   # [DESIGN] cp 7 cm downstream of the CoM along +d_min (0.5, 0.866, 0)
+pcb_pos_m: [-0.235, -0.4070319, 0.0]     # [DESIGN] avionics at the leading vertex (-0.47 d_min) -> CoM 5.0 cm upstream
+trim:                                     # [DESIGN] ~31 g trim at the leading vertex -> the other 2 cm
+  mass_kg: 0.0312
+  pos_m: [-0.2475, -0.4287, 0.0]
+rods:
+  count: 6
+  dipole_max_Am2: 0.80   # sizing study: 2.25 mm x 0.48 m permalloy core, 28.3 g (outputs/SC_v1_6mq/analysis)
+  power_peak_W: 0.050    # [ASSUME] 1.7 mW I^2R + driver overhead
+b_ref_T: 2.5963e-5

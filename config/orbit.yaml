@@ -1,0 +1,27 @@
+# [lo, hi] = drawn each episode, number = fixed, null = variant default.
+training:
+  altitude_km: [300, 500]
+  inc_deg: [20, 40]
+  ecc: [0.0, 0.01]
+  f107: [5, 250]
+  ap: [2, 200]
+  raan_deg: null       # null = U(0, 360)
+  argp_deg: null
+  nu_deg: null
+  omega_dps: [-5, 5]   # initial tumble per axis
+  mass_kg: null        # null = vehicle card (config/plant/power_mtq.yaml)
+  soc: 0.5
+  episode_orbits: null # null = 40 / 120 (v10) / 160 (v11)
+
+# Prescribed-attitude decay simulation (main.py decay).
+simulation:
+  alt0_km: 500
+  alt_stop_km: 250
+  inc_deg: 23
+  ecc: 0.001
+  f107: 150
+  ap: 4
+  mass_kg: 0.625
+  dt_s: 5
+  max_days: 800
+  geom: hex            # hex | stl1pct

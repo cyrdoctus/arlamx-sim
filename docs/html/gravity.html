@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gravity harmonics & third body · ARLAMX v2.7</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false})"></script>
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX v2.7 docs</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7<small>spacecraft plant + deep-RL trainer</small></a>
+<h4>Start</h4>
+<a href="../guide/index.html">User guide</a>
+<a href="index.html">Overview</a>
+<a href="install.html">Install, build, test</a>
+<a href="architecture.html">Architecture & step loop</a>
+<h4>Physics</h4>
+<a href="aerodynamics.html">Free-molecular aerodynamics</a>
+<a href="srp.html">Solar & Earth radiation pressure</a>
+<a href="gravity.html" class="active">Gravity harmonics & third body</a>
+<a href="atmosphere.html">Atmosphere & space weather</a>
+<a href="attitude.html">Attitude, control, magnetics</a>
+<a href="geometry.html">Geometry & panel models</a>
+<h4>Deep RL</h4>
+<a href="training.html">Training & sessions</a>
+<a href="environment.html">Gym env, variants, rewards</a>
+<h4>Reference</h4>
+<a href="config.html">Configuration reference</a>
+<a href="api.html">Python / C++ API</a>
+<a href="validation.html">Validation & known limits</a>
+<h4>Plan</h4>
+<a href="plan-cll-materials.html">CLL + material model plan</a>
+</nav>
+<main>
+<h1>Gravity harmonics &amp; third body</h1>
+<p class="lede">GGM03S spherical-harmonic geopotential, J2/J3 fallback, gravity-gradient torque, and Sun/Moon point-mass perturbations. The Moon can come from a JPL ephemeris file.</p>
+<p class="small">Source: <code>cpp/src/orbit/gravity.cpp</code>, <code>third_body.cpp</code>, <code>frames.cpp</code>, <code>attitude/integrate.cpp</code>.</p>
+
+<h2>Spherical-harmonic geopotential</h2>
+<div class="eq">\[
+U=\frac{\mu}{r}\sum_{n=0}^{N}\Bigl(\frac{R}{r}\Bigr)^n\sum_{m=0}^{n}\bar P_{nm}(\sin\phi)\bigl(\bar C_{nm}\cos m\lambda+\bar S_{nm}\sin m\lambda\bigr),\qquad \mathbf a=\nabla U
+\]</div>
+<ul>
+<li>Coefficients: GRACE <b>GGM03S</b> (<code>data/GGM03S.txt</code>). The header supplies R, μ, ω and nmax.</li>
+<li>Reference model: Basilisk <code>SphericalHarmonicsGravityModel</code>, Autonomous Vehicle Systems Laboratory, University of Colorado Boulder (<a href="https://github.com/AVSLab/basilisk">AVSLab/basilisk</a>, ISC). The plant does not link Basilisk. <code>tests/basilisk_ref/</code> compares the two fields. Cite Basilisk when you reuse this evaluator.</li>
+<li>v2.7.5 stores the GGM03S coefficients fully normalised and evaluates fully normalised associated Legendre functions, so a 70×70 field stays finite. Degrees 2, 8 and 24 match the previous unnormalised evaluator to roundoff.</li>
+<li>Degree cap <code>SH_MAX_DEGREE = 70</code>. Presets stay at <code>fast</code> 2, <code>standard</code> 4, <code>high</code> 8. <code>gravity.model: twobody</code> forces degree 0.</li>
+<li>Frame: the gravity is evaluated in ECEF after a GMST rotation (<code>accel_gravity_N</code>) and rotated back. Earth orientation is GMST-only.</li>
+<li>Gradient: spherical components (∂U/∂r, ∂U/∂φ, ∂U/∂λ) mapped to Cartesian, with a pole guard (cos φ &lt; 1e-14).</li>
+<li>Fallback when no GGM file is found: two-body + closed-form J2 + J3 (J2 = 1.0826e-3, J3 = −2.5327e-6). <code>ArlamxV2Env</code> <b>refuses</b> the silent fallback when a GGM path was requested but failed to load.</li>
+</ul>
+<table>
+<thead><tr><th>YAML</th><th>SimParams</th><th>Default</th></tr></thead>
+<tbody>
+<tr><td><code>gravity.model</code></td><td>—</td><td><code>ggm03s</code> | <code>twobody</code></td></tr>
+<tr><td><code>gravity.degree</code></td><td><code>sh_degree</code></td><td>4 (0–70)</td></tr>
+<tr><td><code>gravity.lunisolar</code></td><td><code>lunisolar</code></td><td>false (high: true)</td></tr>
+<tr><td><code>gravity.gradient_torque</code></td><td><code>gravity_gradient</code></td><td>true</td></tr>
+</tbody>
+</table>
+
+<h3>Magnitude guide at 400 km</h3>
+<table>
+<thead><tr><th>Term</th><th>|a| (m/s²)</th></tr></thead>
+<tbody>
+<tr><td>Two-body</td><td>8.7</td></tr>
+<tr><td>J2</td><td>≈ 1e-2</td></tr>
+<tr><td>degree 3–8 terms</td><td>1e-5 … 1e-6</td></tr>
+<tr><td>Moon third body</td><td>0.6–1.2e-6 (computed with <code>cpp.accel_third_body</code>)</td></tr>
+<tr><td>Sun third body</td><td>0.3–0.5e-6</td></tr>
+<tr><td>Drag on the 0.625 kg SolarCat, face-on, ρ = 3e-12 kg/m³</td><td>≈ 2e-4</td></tr>
+<tr><td>SRP on the same sail, face-on</td><td>≈ 9e-6</td></tr>
+</tbody>
+</table>
+
+<h2>Gravity-gradient torque</h2>
+<div class="eq">\[
+\boldsymbol\tau_{gg}=\frac{3\mu}{r^3}\,\hat u\times\mathbf I\hat u,\qquad \hat u=\text{nadir-to-spacecraft in body axes}
+\]</div>
+<p>It uses the full inertia tensor, and it is on by default (<code>gravity.gradient_torque</code>). The mean over the step is reported as <code>tau_gg_mean</code>.</p>
+
+<h2>Third-body perturbation</h2>
+<div class="eq">\[
+\mathbf a_{3B}=\mu_k\left(\frac{\mathbf r_k-\mathbf r}{|\mathbf r_k-\mathbf r|^3}-\frac{\mathbf r_k}{|\mathbf r_k|^3}\right),\qquad
+\mu_\odot=1.32712440018\times10^{20},\ \mu_\text{☾}=4.902800118\times10^{12}\ \mathrm{m^3s^{-2}}
+\]</div>
+<ul>
+<li>This is the direct form (Montenbruck &amp; Gill §3.3). It is accurate here because |r|/|r_k| is tiny, so there is no cancellation problem worth a Battin f(q) formulation at LEO.</li>
+<li>With <code>lunisolar: true</code>, Sun and Moon positions are computed <b>once per advisor step</b> (300 s) and held. The Moon moves ≈ 0.04° in that time, which is negligible.</li>
+<li>Presets: only <code>high</code> enables lunisolar.</li>
+</ul>
+
+<h2 id="moon">Moon: analytic vs ephemeris file</h2>
+<p><code>Ephemeris::moon_pos(jd)</code> returns the CSPICE <code>spkezr_c("MOON", et, "J2000", "NONE", "EARTH")</code> position when kernels are loaded. Otherwise it falls back to a truncated Meeus series (5 longitude terms, 2 latitude terms, parallax distance).</p>
+<table>
+<thead><tr><th>Source</th><th>Moon direction error</th><th>Moon distance error</th><th>Effect on a_3B at 400 km</th></tr></thead>
+<tbody>
+<tr><td>Analytic Meeus (current build)</td><td>0.25° mean, 0.44° max</td><td>up to ≈ 3000 km</td><td>≈ 3e-8 m/s² (≈ 3 % of the lunar term)</td></tr>
+<tr><td>DE440/DE430 via CSPICE</td><td>&lt; 1e-6° (kernel accuracy)</td><td>metres</td><td>negligible</td></tr>
+</tbody>
+</table>
+<p class="small">The analytic errors above were measured for this page against astropy's built-in ephemeris over 40 epochs in 2026 (TETE frame).</p>
+
+<div class="warn"><b>Current state: the ephemeris path is present but not wired</b>
+<ol>
+<li>The shipped <code>.so</code> was built <b>without CSPICE</b> (<code>CSPICE_INCLUDE</code> and <code>CSPICE_LIB</code> are empty in <code>build/CMakeCache.txt</code>). <code>load_spice</code> therefore returns <code>False</code> and does nothing.</li>
+<li>Nothing in <code>env.py</code>, <code>physics.py</code> or the YAMLs calls <code>load_spice</code>, and there is no <code>ephemeris:</code> config key.</li>
+<li>The time argument is converted as <code>et = (jd − 2451545.0)·86400</code>, which treats the UTC Julian date as TDB. That is ≈ 69 s off in 2026, or ≈ 70 km of lunar motion.</li>
+<li>SPICE returns J2000 axes, while the plant's inertial axes are effectively of-date (GMST rotation, analytic Sun of date). That is a ≈ 0.36° precession mismatch in 2026 for the Sun direction used in SRP and eclipse once SPICE is on. It is harmless for third-body accelerations but visible in eclipse entry/exit timing (up to a few seconds).</li>
+</ol></div>
+
+<h3>How to use an ephemeris file today (no code changes)</h3>
+<ol>
+<li>Rebuild with CSPICE (<a href="install.html#cspice">instructions</a>) and confirm <code>ARLAMX: CSPICE enabled</code> in the configure output.</li>
+<li>Download an SPK, for example <code>de440s.bsp</code> (1849–2150, ≈ 32 MB) from NAIF <code>generic_kernels/spk/planets/</code>.</li>
+<li>In your own driver script, after the env is built:
+<pre><code>env = ArlamxV2Env(variant="v10", physics="high")          # high => lunisolar: true
+ok = env.sim.load_spice(["/data/kernels/de440s.bsp"])     # True only if CSPICE is linked
+assert ok, "CSPICE not linked or kernel failed to load"</code></pre>
+With SubprocVecEnv each worker must call it, so wrap it in <code>make_env</code> or an <code>env_kw</code> hook. SPICE state is process-global.</li>
+<li>For a standard-physics run with the Moon on, pass <code>--physics</code> a copy of <code>physics.yaml</code> with <code>gravity.lunisolar: true</code>.</li>
+</ol>
+<p>A proper <code>ephemeris: {kernels: [...]}</code> YAML key, the TDB conversion and a J2000→of-date rotation are small follow-ups. They are listed in <a href="validation.html">Validation &amp; known limits</a>.</p>
+
+<h2>Validation</h2>
+<ul>
+<li><code>tests/orbit/test_gravity.py</code>: J2/J3 closed form vs SH, finite-difference gradient of U.</li>
+<li><code>tests/basilisk_ref/test_gravity_vs_basilisk.py</code>: SH acceleration vs Basilisk <code>computeField</code> (passes here; skipped without Basilisk).</li>
+<li><code>tests/orbit/test_third_body.py</code>: hand-evaluated third-body case, eclipse, analytic Sun.</li>
+<li><code>ACEnv/Reports/verify_gravity.md</code>: audit record.</li>
+</ul>
+<h2>References</h2>
+<ol class="small">
+<li>Tapley, B. et al. (2007). GGM03 — CSR GRACE gravity model.</li>
+<li>Montenbruck, O. &amp; Gill, E. (2000). <i>Satellite Orbits</i>, §3.2–3.3.</li>
+<li>Kaula, W. M. (1966). <i>Theory of Satellite Geodesy.</i></li>
+<li>Meeus, J. (1998). <i>Astronomical Algorithms</i>, ch. 47.</li>
+<li>Acton, C. H. (1996). NAIF SPICE. <i>Planet. Space Sci.</i> 44(1).</li>
+</ol>
+
+<footer>ARLAMX v2.7 documentation · generated 2026-09-30 from the source tree (cpp/, python/arlamx_v2/, config/). Equations render with KaTeX when online; offline they show as TeX.</footer>
+</main>
+</div>
+</body>
+</html>

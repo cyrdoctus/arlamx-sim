@@ -1,0 +1,31 @@
+# Sampling MPC v1 — the untuned default every v8–v11 gap is measured against.
+# Frozen as provenance; do not edit. v2 is a new file written by tune_mpc.
+#
+# Decision cost (STM32U575, 24-cand × 20-step stand-in): 8.4 ms.
+# Probe reference (v8+ plant, truth state, 20 orbits × 3 probes × 2 seeds):
+#   decay 9.28 km/d, band 86.6 %, downlink 23.2 min/d, brownouts 0,
+#   mtq 2.97 J, MC lifetime 17.9 d, decay@300 88.2 km/d.
+#
+# Tags: [V7] inherited · [NOTE] plant limitation, not a number
+name: mpc_v1
+horizon_steps: 6                 # 6 × 300 s = 30 min
+n_random: 8
+max_cmd_deg: 40.0
+advisor_step_s: 300.0
+use_sun_ephemeris: true
+soc_lo: 0.4
+soc_hi: 0.6
+soc_k: 6.0
+weights:
+  power_band: 1.0
+  power_low_pen: 4.0
+  gs: 2.0
+  gs_pen: 0.5
+  gs_align: 1.0
+  cd: 0.5
+  slew: 0.2
+sensors:
+  enabled: false                 # v1 scored on plant truth
+  soc_sigma: 0.005               # [ASSUME] used only when enabled
+dipole_quant_bits: null          # [NOTE] C++ plant has no 8-bit DAC; skipped
+u575_ms: 8.4

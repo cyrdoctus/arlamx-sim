@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Free-molecular flow · ARLAMX</title>
+<link rel="stylesheet" href="../html/assets/style.css">
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX guide</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7.5<small>user guide</small></a>
+<h4>Guide</h4>
+<a href="index.html">Overview</a>
+<a href="commands.html">Commands</a>
+<a href="fmf.html" class="active">Free-molecular flow</a>
+<a href="control.html">Control loop and deep RL</a>
+<a href="simplify.html">STL simplification</a>
+<a href="libraries.html">Python libraries</a>
+<h4>Also</h4>
+<a href="../index.html">Docs home</a>
+<a href="../html/aerodynamics.html">Aerodynamics reference</a>
+</nav>
+<main>
+<h1>Free-molecular flow</h1>
+<p class="lede">For a plate model of a spacecraft, ARLAMX computes the free-molecular force and torque on every plate and adds solar and Earth radiation pressure. You can sample that force at one attitude, or let it decay an orbit.</p>
+
+<h2>What is summed</h2>
+<ul>
+<li><b>Sentman</b> is the default gas-surface model (<code>aero.gsi: sentman</code> in <code>config/plant/physics.yaml</code>). Energy accommodation <code>alpha_E</code> defaults to 0.93. It is one number for the whole vehicle.</li>
+<li><b>Walker–CLL</b> is the other model. Turn it on with <code>--gsi cll</code>. It uses normal and tangential accommodation and a species mixture from MSIS.</li>
+<li>Each plate carries an outward normal, an area, and a centroid. Force and torque from aero and from radiation pressure enter the equations of motion on every substep.</li>
+<li>The atmosphere along a decay comes from NRLMSIS 2.1 (<code>pymsis</code>), at the geodetic point, with the F10.7 and Ap you set. <code>atmosphere.model</code> can also be <code>nrlmsise00</code> or a constant density.</li>
+<li>The flow includes a co-rotating atmosphere. Gravity on a decay uses the physics preset (degree 4 by default).</li>
+</ul>
+<div class="warn"><b>Plates do not hide each other</b>
+Every plate that faces the flow contributes. Faces that are inside a solid, or behind another plate, are still summed if they remain in the plate list. Simplify to the exterior shell before a force run. The CatSat study in <code>python/arlamx_v2/catsat_fmf_decay.py</code> does that on a 2.6&nbsp;million-triangle STL by keeping a 1&nbsp;mm exterior voxel shell.</div>
+
+<h2>Shipped spacecraft</h2>
+<p><code>config/orbit.yaml</code> → <code>simulation:</code> holds the orbit. <code>geom</code> is <code>hex</code> or <code>stl1pct</code>.</p>
+<pre><code><span class="c"># both drag extremes, 500 km → 250 km, hex sail, standard physics</span>
+python main.py decay
+
+<span class="c"># SolarCat 1% plates, minimum drag, stop at 300 km</span>
+python main.py decay --kind min --set orbit.simulation.geom=stl1pct --set orbit.simulation.alt_stop_km=300
+
+<span class="c"># lift and drag against angle of attack. --out is required.</span>
+python main.py sim lift_drag_study --geom stl1pct --out outputs/results/lift_drag
+
+<span class="c"># one angle of attack, held, from 500 km toward 300 km</span>
+python main.py sim aoa_decay --alpha 45 --geoms stl1pct</code></pre>
+<p>On a decay the plant mode is <code>prescribed</code>: the attitude is set to the target each substep and the body rate is zero. That isolates the aerodynamic orbit change from the control law. Closed-loop tracking is the <a href="control.html">control</a> page.</p>
+<p>Useful knobs on <code>simulation:</code> and as flags: <code>alt0_km</code>, <code>alt_stop_km</code>, <code>inc_deg</code>, <code>ecc</code>, <code>f107</code>, <code>ap</code>, <code>mass_kg</code>, <code>dt_s</code>, <code>max_days</code>. <code>--physics fast|standard|high</code> and <code>--gsi sentman|cll</code> select the force model.</p>
+
+<h2>Your own spacecraft</h2>
+<p>The stock <code>decay</code> command only knows <code>hex</code> and <code>stl1pct</code>. For another vehicle, simplify the mesh, then drive the same plant the decay tool drives. STL and OBJ are read as millimetres unless you pass <code>--units</code>. STEP is read in the file’s own unit and returned in metres (that path needs <code>cascadio</code>).</p>
+<pre><code>python main.py sim geometry --in craft.stl --quality 1pct
+<span class="c"># writes outputs/results/geometry/craft_1pct.geom</span></code></pre>
+<p>A <code>.geom</code> line is <code>nx ny nz area_m2 cx cy cz</code>. The C++ plant never sees the original triangles. Loading those plates and taking one step looks like the body of <code>python/arlamx_v2/decay_run.py</code>:</p>
+<pre><code>import numpy as np
+from arlamx_v2 import cpp
+from arlamx_v2 import physics as physics_mod
+from arlamx_v2.geometry import load_geom
+from arlamx_v2.paths import resolve_ggm
+
+n, A, c = load_geom("outputs/results/geometry/craft_1pct.geom")
+params = cpp.SimParams()
+params.mass = 2.0
+params.dt_s = 2.0
+params.advisor_step_s = 2.0
+params.mode = "prescribed"
+physics_mod.apply_to_params(
+    params, physics_mod.load("standard"), ggm_path=resolve_ggm())
+sim = cpp.Simulator(params)
+sim.set_mode("prescribed")
+sim.set_panels(n, A, c)
+sim.set_inertia_diag(np.array([0.02, 0.02, 0.01]))
+sim.set_atmosphere(3.0e-12, 900.0, 2.656e-26)   <span class="c"># or query_msis, as decay_run.py does</span>
+<span class="c"># sim.reset(r_m, v_m_s, sigma, omega)</span>
+<span class="c"># out = sim.step(quaternion)   # keys include altitude_km, Cd, Cl, drag_N</span></code></pre>
+<p><code>decay_run.py</code> is the full orbit: classical elements to position and velocity, MSIS on a timer, a min-drag or max-drag quaternion, and a CSV. Copy that loop and replace <code>load_panels</code> with <code>load_geom</code> of your file. Set mass and inertia to the vehicle. The constant-density <code>set_atmosphere</code> call above is only a single-step illustration. A decay should call <code>query_msis</code>.</p>
+<p>For training on your plates, construct <code>ArlamxV2Env(geom_path="craft_1pct.geom")</code>. <code>python main.py train</code> itself uses the hex sail, or the vehicle card when the variant is <code>v10r6</code>. See the <a href="control.html">control</a> page.</p>
+
+<h2>Related tools</h2>
+<ul>
+<li><code>python main.py sim srp_assess</code> asks whether solar pressure can raise or hold the orbit for the shipped geometries.</li>
+<li><code>python main.py sim optics_run</code> swaps sail optical presets and reports force and one-orbit energy.</li>
+<li><code>python main.py sim advisor_run</code> flies the closed-loop heuristic and MPC advisors, with aerodynamics still on.</li>
+</ul>
+<p>Equations, accommodation, and the difference between Sentman and the Walker fit are in the <a href="../html/aerodynamics.html">aerodynamics reference</a>.</p>
+
+<footer>ARLAMX v2.7.5 user guide</footer>
+</main>
+</div>
+</body>
+</html>

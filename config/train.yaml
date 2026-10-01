@@ -1,0 +1,30 @@
+name: null           # null = auto (MM-DD-HH-MM_ALGO_LxW)
+backend: train       # train | v12
+variant: v10         # v3 v4a v4b v5a v5b v6 v7 v8a v8b v9a-d v10 v11 v10r6 (v12 backend: always v10)
+physics: standard    # fast | standard | high | path/to/physics.yaml
+gsi: null            # null = physics file | sentman | cll
+controller: null     # null = physics file | mrp | quaternion
+reward_w: {}         # reward weight overrides, e.g. {dE_weight: 3.0}
+
+v12:                 # backend v12 only (V12Wrapper + 50k checkpoint eval)
+  w_slew: 0.5
+  use_cmp: false
+  w_env: 0.0
+  clip_wrong_way: false
+  use_pwr_est: false
+  w_clip: 0.0
+  w_plan: 0.0
+  w_hold: 0.0
+  adapt_mrp: false
+  dual_eval: false
+  dual_gate: v135
+  climate_mix: false
+  climate_wide: false
+  w_band_storm: 0.0
+  w_low: 0.0
+  low_soc_frac: 0.0
+  w_low_thr: 0.25
+  w_gen: 0.0
+  w_gen_thr: 0.20
+  resume: null         # checkpoint dir with model.zip + vecnormalize.pkl
+  ppo_kw: {}           # PPO retune applied after build/resume

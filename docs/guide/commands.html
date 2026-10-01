@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Commands · ARLAMX</title>
+<link rel="stylesheet" href="../html/assets/style.css">
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX guide</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7.5<small>user guide</small></a>
+<h4>Guide</h4>
+<a href="index.html">Overview</a>
+<a href="commands.html" class="active">Commands</a>
+<a href="fmf.html">Free-molecular flow</a>
+<a href="control.html">Control loop and deep RL</a>
+<a href="simplify.html">STL simplification</a>
+<a href="libraries.html">Python libraries</a>
+<h4>Also</h4>
+<a href="../index.html">Docs home</a>
+<a href="../html/index.html">Physics reference</a>
+</nav>
+<main>
+<h1>Commands</h1>
+<p class="lede">Everything user-facing goes through <code>python main.py</code> in the repository root. It puts <code>python/</code> on the path itself. <code>python main.py list</code> prints every command and tool.</p>
+
+<h2>Where a run reads its settings</h2>
+<table>
+<thead><tr><th>File</th><th>What you edit</th></tr></thead>
+<tbody>
+<tr><td><code>config/network.yaml</code></td><td>Algorithm (<code>ppo</code>, <code>sac</code>, <code>td3</code>), depth, width, timesteps, parallel envs, seed</td></tr>
+<tr><td><code>config/network_quick.yaml</code></td><td>The same file, sized for a smoke run</td></tr>
+<tr><td><code>config/orbit.yaml</code></td><td><code>training:</code> the envelope drawn each episode. <code>simulation:</code> the orbit for <code>decay</code></td></tr>
+<tr><td><code>config/train.yaml</code></td><td>Variant, physics preset, gas-surface model, attitude law, reward weights</td></tr>
+<tr><td><code>config/plant/physics.yaml</code></td><td>Gravity degree, atmosphere, Sentman or CLL, radiation pressure, magnetics, inner-loop step. <code>physics_fast.yaml</code> and <code>physics_high.yaml</code> are the other presets</td></tr>
+<tr><td><code>config/plant/gains_mrp.yaml</code></td><td>Attitude-law gains and the gate floor</td></tr>
+<tr><td><code>config/plant/power_mtq.yaml</code></td><td>Coil dipole and power limits</td></tr>
+<tr><td><code>config/sweep.yaml</code></td><td>A grid of training sessions</td></tr>
+</tbody>
+</table>
+<p>In <code>orbit.yaml</code> under <code>training:</code>, a pair <code>[lo, hi]</code> is drawn every episode, a bare number is fixed, and <code>null</code> keeps that variant’s own default.</p>
+<p>Flags and <code>--set section.key=value</code> override the files. The value is read as YAML. Sections are <code>network</code>, <code>orbit</code>, and <code>train</code>. <code>--network</code>, <code>--orbit</code>, and <code>--train</code> swap in a whole file.</p>
+
+<h2>Check the install</h2>
+<pre><code>python main.py test      <span class="c"># pytest. Basilisk referee tests skip when Basilisk is absent</span>
+python main.py verify    <span class="c"># each kernel against an independent check</span></code></pre>
+
+<h2>Simulate</h2>
+<pre><code>python main.py decay
+python main.py decay --kind min --physics high --set orbit.simulation.alt0_km=450
+python main.py decay --set orbit.simulation.geom=stl1pct
+
+python main.py sim geometry --in craft.stl --quality 1pct
+python main.py sim lift_drag_study --out outputs/results/lift_drag
+python main.py sim aoa_decay --alpha 45
+python main.py sim srp_assess
+python main.py sim srp_f107_sweep -h
+python main.py sim optics_run -h
+python main.py sim advisor_run -h
+python main.py sim validate_attitudes --quality 1pct
+python main.py sim plot_simplify</code></pre>
+<p><code>decay</code> reads <code>config/orbit.yaml</code> → <code>simulation:</code> and writes <code>outputs/results/decay/&lt;stamp&gt;_&lt;kind&gt;_&lt;physics&gt;/</code> plus the <code>settings.yaml</code> it used. <code>--kind</code> is <code>min</code>, <code>max</code>, or <code>both</code>.</p>
+<p>The shipped geometries on these tools are <code>hex</code> (the hex sail in <code>data/earthcup_hex_v3.geom</code>) and <code>stl1pct</code> (SolarCat, simplified at the 1% budget). A mesh of your own spacecraft takes the path on the <a href="fmf.html">free-molecular flow</a> page. <code>validate_attitudes</code> checks the SolarCat STL. <code>plot_simplify</code> draws a cube and a hex prism.</p>
+<p><code>python main.py sim &lt;tool&gt; -h</code> prints that tool’s flags.</p>
+
+<h2>Train</h2>
+<pre><code>python main.py train
+python main.py train --network config/network_quick.yaml
+python main.py train --algo sac --arch 3x32 --timesteps 500000 --n-envs 16 --seed 7
+python main.py train --variant v11 --physics high --gsi cll --controller quaternion
+python main.py train --name storm --set orbit.training.ap=[100,200]
+python main.py train --variant v10r6</code></pre>
+<p>How that loop is built, and what the variant changes, is on the <a href="control.html">control</a> page. A session writes:</p>
+<ul>
+<li><code>outputs/snapshots/&lt;MM-DD-HH-MM&gt;_&lt;ALGO&gt;_&lt;LxW&gt;.yaml</code> before training starts, and again when it ends. A crash is recorded too.</li>
+<li><code>outputs/models/&lt;id&gt;/</code> with the Stable-Baselines3 zip, <code>vecnormalize.pkl</code>, TensorBoard logs, and <code>metrics.json</code>.</li>
+</ul>
+<pre><code>python main.py snapshots
+python main.py train --from-snapshot outputs/snapshots/&lt;id&gt;.yaml
+python main.py sweep --config config/sweep.yaml
+python main.py quantize --in outputs/models/&lt;id&gt;/models/ppo_&lt;id&gt;.zip --out int8.zip</code></pre>
+<p>Replaying a snapshot keeps its plant. Changing <code>train.variant</code>, <code>backend</code>, <code>physics</code>, <code>gsi</code>, or <code>reward_w</code> reads the plant YAML again.</p>
+<p>The <code>v12</code> backend is PPO on variant v10 with an extra wrapper, a checkpoint, and a 10-orbit comparison every 50&nbsp;000 steps. Pass <code>--backend v12</code>.</p>
+
+<h2>Physics switches you will actually use</h2>
+<table>
+<thead><tr><th>Switch</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>--physics fast</code></td><td>Gravity degree 2. The short preset.</td></tr>
+<tr><td><code>--physics standard</code></td><td>Degree 4, Sentman, WMM, optical solar pressure. The default.</td></tr>
+<tr><td><code>--physics high</code></td><td>Degree 8 and Sun/Moon third body.</td></tr>
+<tr><td><code>--gsi sentman</code></td><td>Sentman free-molecular model. The default.</td></tr>
+<tr><td><code>--gsi cll</code></td><td>Walker–CLL fit, with a 7-species MSIS mixture.</td></tr>
+<tr><td><code>--controller mrp</code></td><td>Modified-Rodrigues-parameter attitude law. The default.</td></tr>
+<tr><td><code>--controller quaternion</code></td><td>Quaternion attitude law. Same magnetorquer path.</td></tr>
+</tbody>
+</table>
+<p>Degree 70 is available by setting <code>gravity.degree</code> in a physics file. The training presets stay at 2, 4, and 8.</p>
+
+<h2>Older campaign tools</h2>
+<p><code>python main.py eval</code>, <code>plot</code>, and <code>legacy</code> rebuild figures and reports from the pre-v2.7 campaigns. They read and write <code>outputs/.old/</code>. <code>python main.py list</code> names each one. Several of them take no flags and start as soon as you call them, so use <code>-h</code> when you only want the description.</p>
+
+<footer>ARLAMX v2.7.5 user guide · every flag is also in <code>docs/notes/commands.md</code>.</footer>
+</main>
+</div>
+</body>
+</html>

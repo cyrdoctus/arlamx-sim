@@ -1,0 +1,3 @@
+# SC_v3_6mq_nGPS: no GNSS receiver; onboard fp32 nav from the launch state + panel eclipse timing (python/arlamx_v2/nav.py).
+extends: sc_v3_6mq.yaml
+nav: est

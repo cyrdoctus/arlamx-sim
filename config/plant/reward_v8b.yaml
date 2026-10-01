@@ -1,0 +1,80 @@
+# SC_v8b — perturbation-assisted control ENABLED (the treatment arm).
+#
+# Identical to reward_v8a.yaml except `delegation.enabled: true`. Diff the two
+# files: the only change should be that one flag. Equations are numbered in
+# python/arlamx_v2/reward_v8.py and restated in docs/modules/14_reward_v8.md.
+name: SC_v8b
+variant: v8b
+
+v7:
+  band_weight: 1.0            # [V7]
+  band_lo: 0.4                # [V7]
+  band_hi: 0.6                # [V7]
+  band_above_mode: exp        # [V7]
+  band_decay_k: 6.0           # [V7]
+  band_above_slope: 2.0       # [V7]
+  band_low_weight: 4.0        # [V7]
+  band_depletion: 50.0        # [V7]
+  dE_weight: 2.6              # [TUNED] was 3.5, see reward_v8a.yaml
+  gs_weight: 2.0              # [V7]
+  tier_deg: [2.0, 5.0, 10.0]  # [V7]
+  tier_scale: [1.0, 0.5, 0.25]  # [V7]
+  gs_penalty: 0.5             # [V7]
+  feas_weight: 1.0            # [V7]
+  smooth_weight: 0.02         # [V7]
+  omega_weight: 0.002         # [V7]
+  momentum_weight: 0.001      # [V7]
+  thrift_weight: 0.9          # [V7]
+  brownout_weight: 100.0      # [V7]
+  brownout_gen: 1.0           # [V7]
+
+stability:
+  margin_weight: 4.0          # [ASSUME]
+  h_soft_km: 320.0            # [ASSUME]
+  h_floor_km: 250.0           # [V7]
+  decay_stab_weight: 0.6      # [ASSUME]
+  decay_stab_scale: 100.0     # [DERIVED] see reward_v8a.yaml
+  decay_stab_cap: 3.0         # [ASSUME]
+
+# ---------------------------------------------------------------------------
+# Delegation to environmental perturbation — ON  (eq. 1-8)
+# ---------------------------------------------------------------------------
+delegation:
+  enabled: true
+
+  # eq. (6) power actually saved by gating, credited only in the direction the
+  # controller wanted. Deliberately the largest single weight in the file: the
+  # whole hypothesis of v8b is that this is worth chasing, and if it is not
+  # large enough to move the policy the experiment answers nothing.
+  w_power: 6.0                # [ASSUME]
+
+  # eq. (7) signed accuracy of the delegation decision. Smaller than w_power but
+  # SIGNED, so handing an axis to an environment that fights back is a real cost
+  # and the policy cannot farm w_power by delegating everything.
+  w_accuracy: 2.0             # [ASSUME]
+
+  # eq. (8) multiplicative boost applied to the mission terms delegation helped
+  # produce (dE_vs_baseline, power_band, gs_tiered_pointing) — positive terms
+  # only, never penalties. kappa = 0.5 => at most +50 % on those terms.
+  kappa: 0.5                  # [ASSUME]
+
+  # eq. (5) significance gate. Below p_min the saving is noise and earns no
+  # boost at all; at p_sig it earns the full boost. p_min = 5 % encodes "a 4 %
+  # improvement is not worth a mission penalty".
+  p_min: 0.05                 # [ASSUME]
+  p_sig: 0.25                 # [ASSUME]
+
+  # eq. (2) torque floor below which "what the controller wanted" is numerical
+  # noise and alignment reports 0 instead of a sign. ~0.06 % of X/Y peak torque.
+  torque_floor_Nm: 1.0e-11    # [ASSUME]
+  # eq. (2) magnitude scale: the torque that turns the craft ~3 deg in one
+  # 300 s step on the X/Y inertia (0.5*(tau/I)*t^2). Alignment magnitude
+  # saturates at 1 above this — "big enough to matter on this timescale",
+  # NOT "rivals the PD demand" (grok critique B3).
+  tau_env_ref_Nm: 1.5e-8      # [DERIVED]
+
+trend:
+  enabled: false
+  gain_alt: 0.8
+  gain_soc: 1.0
+  soc_ref: 0.2

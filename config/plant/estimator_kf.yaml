@@ -1,0 +1,70 @@
+# Disturbance-torque Kalman filter — SC_v8/v9 environment estimator.
+#
+# Model (python/arlamx_v2/estimators.py, eq. 2-5):
+#
+#   state   x = [tau (3), tau_dot (3)]        constant-velocity on the torque
+#   F       = [[I3, dt*I3], [0, I3]]
+#   Q       = sigma_jerk^2 * [[dt^3/3, dt^2/2], [dt^2/2, dt]] (x) I3
+#   H       = [I3, 0]
+#   z       = I*(w1-w0)/dt + w1 x I*w1 - tau_cmd          (the v7 raw observer)
+#   R       = diag(sigma_z^2), sigma_z from the gyro noise through the
+#             finite difference:
+#               sigma_z_i = sqrt( (I_i*sigma_w*sqrt(2)/dt)^2
+#                                 + (2*|I*w|_i*sigma_w)^2
+#                                 + sigma_tau_cmd^2 )
+#
+# Why constant-velocity: the aerodynamic torque varies smoothly on the orbital
+# timescale (~90 min) while the measurement noise is white, so a model that
+# carries a rate term tracks the orbital swing instead of lagging it. The v7
+# unfiltered observer scored r = 0.47 against plant truth for an actively
+# slewing policy; this filter is the fix for that number.
+#
+# Tags: [ASSUME] no bench measurement yet · [DERIVED] computed from other specs
+name: torque_kf_v8
+
+enabled: true
+
+# The only genuinely free parameter: the white PSD of the CV model's driving
+# noise (tau_ddot; the first draft called this "jerk", which was a misnomer —
+# grok critique 2.5). Derived from the signal the v8 plant actually produces:
+# with the 1 cm cp-cm offset the aero torque is uN-class and CHANGES by ~1 uN*m
+# within one 300 s step whenever the attitude slews, so
+# sigma_drive * sqrt(dt^3/3) = 1e-6 at dt = 300 -> sigma_drive ~ 3e-10.
+# (Burn-in 2026-08-20: at 1e-12 — sized for the old symmetric geometry's 3 nN
+# steps — the filter over-smoothed the slewing signal and DEGRADED the raw
+# observer from r = 0.98 to 0.62. The gate caught it.)
+sigma_drive: 3.0e-10          # [DERIVED] N*m/s^1.5
+
+# Uncertainty in the torque the controller believes it applied — the dipole is
+# commanded open-loop against an estimated field, so ~10 % of a typical
+# |tau_ctrl| ~ 20 nN*m. The old 1e-8 dominated R and drowned the gyro term.
+sigma_tau_cmd: 2.0e-9         # [ASSUME] N*m
+
+# Initial covariance. p0_tau is deliberately loose: the filter seeds itself on
+# the first measurement rather than on zero, so this only sets how fast it
+# forgets that seed.
+p0_tau: 1.0e-6                # [ASSUME] (N*m)^2
+p0_taudot: 1.0e-12            # [ASSUME] (N*m/s)^2
+
+# Innovation gate. Beyond this many sigma the sample's R is inflated rather than
+# the sample rejected — a hard reject deadlocks the filter when the true torque
+# genuinely steps, which is exactly what happens at storm onset.
+innovation_gate_sigma: 5.0    # [ASSUME]
+
+# Vehicle inertia, must match env.INERTIA_DIAG.
+inertia_diag: [0.0125, 0.0125, 0.025]   # [SPEC] SolarCat
+
+# ---------------------------------------------------------------------------
+# Acceptance test for the filter, run during burn-in
+# ---------------------------------------------------------------------------
+acceptance:
+  # With the cp-offset geometry the raw 300 s observer is already r ~ 0.98
+  # against plant truth (the uN-class signal is far above the noise floor), so
+  # "beat raw by 0.10" is unattainable there. The honest two-sided gate:
+  #   - the filter must never DEGRADE the raw observer by more than this
+  max_r_degradation: 0.02     # [ASSUME]
+  #   - and in the noise-dominated regime (synthetic CV signal at the R floor,
+  #     tests/estimators/test_kf.py) it must beat raw RMS by >= 20 %.
+  min_synthetic_gain: 0.20    # [ASSUME]
+  # And must not lag: cross-correlation peak within one advisor step of zero.
+  max_lag_steps: 1            # [ASSUME]

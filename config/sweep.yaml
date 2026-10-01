@@ -1,0 +1,12 @@
+# Each run = config/*.yaml + base + one grid combination (or one arm).
+name: example
+base:
+  network.timesteps: 100000
+  network.n_envs: 8
+  train.variant: v8a
+grid:
+  network.algo: [ppo, sac]
+  train.controller: [mrp, quaternion]
+# arms:              # explicit list instead of grid
+#   - {train.physics: high}
+#   - {network.width: 32, network.ppo.learning_rate: 1.0e-4}

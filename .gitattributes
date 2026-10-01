@@ -1,0 +1,10 @@
+* text=auto eol=lf
+
+# Third-party coefficient tables and plate models. Keep them in the repo;
+# do not let them dominate the language statistics.
+data/GGM03S.txt linguist-vendored
+data/*.COF linguist-vendored
+data/*.csv linguist-vendored
+*.geom linguist-vendored
+*.stl linguist-vendored
+*.STL linguist-vendored

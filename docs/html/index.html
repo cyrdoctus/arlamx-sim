@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overview · ARLAMX v2.7</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false})"></script>
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX v2.7 docs</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7<small>spacecraft plant + deep-RL trainer</small></a>
+<h4>Start</h4>
+<a href="../guide/index.html">User guide</a>
+<a href="index.html" class="active">Overview</a>
+<a href="install.html">Install, build, test</a>
+<a href="architecture.html">Architecture & step loop</a>
+<h4>Physics</h4>
+<a href="aerodynamics.html">Free-molecular aerodynamics</a>
+<a href="srp.html">Solar & Earth radiation pressure</a>
+<a href="gravity.html">Gravity harmonics & third body</a>
+<a href="atmosphere.html">Atmosphere & space weather</a>
+<a href="attitude.html">Attitude, control, magnetics</a>
+<a href="geometry.html">Geometry & panel models</a>
+<h4>Deep RL</h4>
+<a href="training.html">Training & sessions</a>
+<a href="environment.html">Gym env, variants, rewards</a>
+<h4>Reference</h4>
+<a href="config.html">Configuration reference</a>
+<a href="api.html">Python / C++ API</a>
+<a href="validation.html">Validation & known limits</a>
+<h4>Plan</h4>
+<a href="plan-cll-materials.html">CLL + material model plan</a>
+</nav>
+<main>
+<h1>ARLAMX v2.7</h1>
+<p class="lede">A C++ spacecraft plant (orbit + attitude + environment) with a Python Gymnasium environment and Stable-Baselines3 trainers. It is built to train deep-RL attitude advisors for drag/SRP-sail CubeSats in very-low and low Earth orbit (250–500 km).</p>
+
+<div class="note"><b>How to read this site</b>
+For commands, a free-molecular run, the control loop, deep RL, and STL simplification, start with the <a href="../guide/index.html">user guide</a>. Each physics page covers what the model computes, the exact equations in the source, where it lives, the configuration switches, how it was validated, and its limits. The <a href="validation.html">Validation &amp; known limits</a> page lists every accuracy issue found during this documentation pass. The <a href="plan-cll-materials.html">CLL + material model plan</a> is the implementation plan and effort estimate you asked for. No code was changed.</div>
+
+<h2>Capability status</h2>
+<p>These are the requirements you stated, checked against the v2.7 source (not the older design notes). Status means what the shipped code does today.</p>
+<table>
+<thead><tr><th>Requirement</th><th>Status</th><th>What exists</th><th>What is missing / caveat</th></tr></thead>
+<tbody>
+<tr><td>Train deep-RL models</td><td><span class="tag ok">Supported</span></td>
+<td>Gymnasium env <code>ArlamxV2Env</code> (variants v3–v11, v10r6), SB3 PPO/SAC/TD3, VecNormalize, snapshots, sweeps, v12 wrapper backend, INT8 export. <code>python main.py train</code>.</td>
+<td>Policy observes plant truth (r, v, ω, σ, B); sensors feed only the torque KF. Step time ≈1.2 ms (v10).</td></tr>
+<tr><td>Free-molecular-flow aerodynamics as a perturbation</td><td><span class="tag ok">Supported</span></td>
+<td>Per-panel Sentman (default) with Moe &amp; Moe energy accommodation. Optional Walker–CLL closed-form fit with a 7-species MSIS mixture. Force <em>and</em> torque enter the equations of motion every 2 s substep, with a co-rotating atmosphere and a wind hook.</td>
+<td>Accommodation is one global value, not per material. No self-shadowing or flow shielding between panels. CLL is the Walker fit, not the exact kernel (see the <a href="plan-cll-materials.html">plan</a>).</td></tr>
+<tr><td>Solar radiation pressure</td><td><span class="tag ok">Supported</span></td>
+<td>Per-panel optical plate law (absorbed / specular / diffuse), 1/d² scaling, force + moment, Earth IR + albedo, cylindrical eclipse. The default optics preset is <code>al_mylar</code>.</td>
+<td>One optical partition for the whole vehicle. No thermal re-emission force, no penumbra, no self-shadowing.</td></tr>
+<tr><td>Gravity harmonics (“modal harmonics”)</td><td><span class="tag ok">Supported</span></td>
+<td>GGM03S fully normalised spherical harmonics through degree 70 (presets: fast 2, standard 4, high 8), J2/J3 closed-form fallback, gravity-gradient torque.</td>
+<td>Earth rotation is GMST-only, with no precession, nutation or polar motion. This is consistent inside the plant.</td></tr>
+<tr><td>Dynamic space weather</td><td><span class="tag partial">Partial</span></td>
+<td>NRLMSIS 2.1 / NRLMSISE-00 per advisor step at the geodetic point, with linear time interpolation over the step. F10.7/Ap are randomised per episode, plus 2–8 random step jumps (v10+). <code>query_msis</code> accepts a 7-element Ap history.</td>
+<td>No observed or forecast index files are replayed. The env passes a scalar Ap, so storm-time mode is unused in training. F10.7a is set equal to F10.7, and the v10 floor of F10.7 = 5 sfu is outside MSIS's physical range.</td></tr>
+<tr><td>Moon third-body perturbation from an ephemeris file</td><td><span class="tag partial">Partial</span></td>
+<td>Point-mass Sun + Moon third-body acceleration. CSPICE hook <code>Simulator.load_spice(kernels)</code> uses <code>spkezr_c</code>. The analytic Meeus Moon is the fallback.</td>
+<td>The current build has <b>no CSPICE linked</b> (CMake cache empty), and no YAML/env path calls <code>load_spice</code>. Lunisolar is on only in the <code>high</code> preset. The analytic Moon measured 0.25° mean / 0.44° max direction error and ≈3000 km range error. <a href="gravity.html#moon">How to enable it</a>.</td></tr>
+<tr><td>Material-specific panels (diffuse / specular / absorbed, gas + light)</td><td><span class="tag gap">Not yet</span></td>
+<td>Global optical presets (<code>sail_optics.py</code>) and global α values.</td>
+<td>The panel table (<code>PanelSoA</code>, <code>.geom</code>) has no material column. See the <a href="plan-cll-materials.html">plan</a>.</td></tr>
+</tbody>
+</table>
+
+<h2>What the program is</h2>
+<div class="grid">
+<div class="card"><h3>C++ plant</h3><p class="small"><code>cpp/</code> → <code>python/arlamx_v2/arlamx_cpp*.so</code> (pybind11). The <code>Simulator</code> class integrates translational + rotational state (r, v, MRP σ, ω) with classical RK4. Each call to <code>step(q_cmd)</code> advances one advisor step (300 s) in 2 s substeps.</p></div>
+<div class="card"><h3>Environment models</h3><p class="small">Sentman / Walker-CLL aero, optical-plate SRP, Earth IR + albedo, GGM03S gravity, Sun/Moon third body, WMM / tilted dipole field, gravity-gradient torque, MSIS atmosphere (Python side, pymsis).</p></div>
+<div class="card"><h3>Actuation &amp; control</h3><p class="small">MRP or quaternion PD attitude law with per-axis torque clips. Magnetorquers (τ = m × B, 3-axis coils or N torque rods with least-squares allocation), B-dot detumble, flow-frame command holding, optional onboard-nav targets.</p></div>
+<div class="card"><h3>RL layer</h3><p class="small"><code>ArlamxV2Env</code> (Gymnasium) with power, sensors, torque Kalman filter, ground stations, membrane damage and weather jumps. Trained with SB3 PPO/SAC/TD3. Snapshots pin every setting for exact replay.</p></div>
+</div>
+
+<h2>Quick start</h2>
+<pre><code>mamba activate arlamx                 <span class="c"># or PY=~/miniforge3/envs/ThesisMS/bin/python</span>
+./build.sh                            <span class="c"># C++ plant -> python/arlamx_v2/arlamx_cpp*.so</span>
+python main.py test                   <span class="c"># 268 passed on 2026-09-30 (ThesisMS env)</span>
+python main.py verify                 <span class="c"># independent physics cross-check</span>
+python main.py train --network config/network_quick.yaml   <span class="c"># smoke training run</span>
+python main.py train --physics high --gsi cll              <span class="c"># CLL + lunisolar + degree 8</span>
+python main.py decay --kind both                           <span class="c"># prescribed min/max-drag decay</span></code></pre>
+
+<h2>Site map</h2>
+<div class="toc">
+<a href="install.html">Install, build, test</a>
+<a href="architecture.html">Architecture &amp; the step loop</a>
+<a href="aerodynamics.html">Free-molecular aerodynamics (Sentman, Walker-CLL)</a>
+<a href="srp.html">Solar &amp; Earth radiation pressure</a>
+<a href="gravity.html">Gravity harmonics, third body, Moon ephemeris</a>
+<a href="atmosphere.html">Atmosphere &amp; space weather</a>
+<a href="attitude.html">Attitude, control, magnetics</a>
+<a href="geometry.html">Geometry &amp; panel models</a>
+<a href="training.html">Training, sessions, sweeps, quantization</a>
+<a href="environment.html">Gym env, variants, observation, action, reward</a>
+<a href="config.html">Configuration reference</a>
+<a href="api.html">Python / C++ API reference</a>
+<a href="validation.html">Validation &amp; known limits</a>
+<a href="plan-cll-materials.html">Plan: exact CLL + material model</a>
+</div>
+
+<footer>ARLAMX v2.7 documentation · generated 2026-09-30 from the source tree (cpp/, python/arlamx_v2/, config/). Equations render with KaTeX when online; offline they show as TeX.</footer>
+</main>
+</div>
+</body>
+</html>

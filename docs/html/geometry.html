@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Geometry & panel models · ARLAMX v2.7</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false})"></script>
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX v2.7 docs</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7<small>spacecraft plant + deep-RL trainer</small></a>
+<h4>Start</h4>
+<a href="../guide/index.html">User guide</a>
+<a href="index.html">Overview</a>
+<a href="install.html">Install, build, test</a>
+<a href="architecture.html">Architecture & step loop</a>
+<h4>Physics</h4>
+<a href="aerodynamics.html">Free-molecular aerodynamics</a>
+<a href="srp.html">Solar & Earth radiation pressure</a>
+<a href="gravity.html">Gravity harmonics & third body</a>
+<a href="atmosphere.html">Atmosphere & space weather</a>
+<a href="attitude.html">Attitude, control, magnetics</a>
+<a href="geometry.html" class="active">Geometry & panel models</a>
+<h4>Deep RL</h4>
+<a href="training.html">Training & sessions</a>
+<a href="environment.html">Gym env, variants, rewards</a>
+<h4>Reference</h4>
+<a href="config.html">Configuration reference</a>
+<a href="api.html">Python / C++ API</a>
+<a href="validation.html">Validation & known limits</a>
+<h4>Plan</h4>
+<a href="plan-cll-materials.html">CLL + material model plan</a>
+</nav>
+<main>
+<h1>Geometry &amp; panel models</h1>
+<p class="lede">Every force model (aero, SRP, Earth radiation) sums over one flat-plate table: outward normal, area and centroid per plate. This page covers where that table comes from and what it can and cannot carry.</p>
+
+<h2>The <code>.geom</code> plate format</h2>
+<pre><code># comment lines start with '#'
+# nx ny nz  area_m2  cx cy cz        (body frame, metres; normal is normalised on load)
+3.86397878e-08 -9.25292046e-09 1  0.6851072  2.85854239e-06 -1.23764175e-08 -0.00148214848
+2.56280635e-05  1.47689322e-05 -1 0.686308478 -4.750931e-06 1.54475543e-05 -0.00185992405
+...</code></pre>
+<ul>
+<li>Exactly 7 columns per line. <code>geometry.load_geom</code> rejects anything else, so there is <b>no material column</b> today.</li>
+<li>A thin membrane is two plates with opposite normals (front and back). Each face is summed separately by the aero and SRP laws.</li>
+<li>Loaded into C++ as <code>PanelSoA {nx, ny, nz, area, cx, cy, cz}</code> via <code>Simulator.set_panels(n, A, c)</code>.</li>
+</ul>
+
+<h3>Shipped models</h3>
+<table>
+<thead><tr><th>File</th><th>Plates</th><th>Used by</th></tr></thead>
+<tbody>
+<tr><td><code>data/earthcup_hex_v3.geom</code></td><td>hex sail plate model</td><td>default env (v3–v11)</td></tr>
+<tr><td><code>data/SolarCat_v3_1pct_plates.geom</code></td><td>176 (raw STL triangles merged by normal, 12° tolerance). Error vs the full mesh over 200 attitudes: force 0.094 %, projected area 0.892 %, torque 2.681 %.</td><td>SC_v1/v2/v3_6mq, <code>vehicle_v3*.yaml</code></td></tr>
+</tbody>
+</table>
+
+<h2>Mesh → plates (<code>geometry.py</code>)</h2>
+<ol>
+<li><code>load_mesh</code>: STL/OBJ (unit default mm) or STEP/STP (via trimesh + cascadio/OpenCASCADE, using the file's own unit). Welds vertices and drops degenerate faces.</li>
+<li>Region-grow faces whose normals are within θ_merge (8° for quality <code>1pct</code>).</li>
+<li>Area-weighted least-squares plane per side, outward flip.</li>
+<li>Seal: shared edges are snapped to the intersection line of the two side planes, so there are no cracks.</li>
+<li>Ear-clip each sealed polygon. Each triangle becomes a plate (n̂, A, r_c).</li>
+<li>Quality budget <code>1pct</code> / <code>5pct</code> / <code>10pct</code> on wetted and ram area at six attitudes. The original triangle area is kept where an outline would exceed the budget.</li>
+</ol>
+<pre><code>python main.py sim geometry --in part.step --quality 1pct        <span class="c"># -> outputs/results/geometry/part_1pct.geom</span>
+python main.py sim validate_attitudes --quality 1pct              <span class="c"># projected-area check vs the STL</span>
+python main.py sim plot_simplify                                  <span class="c"># 3D comparison figure</span></code></pre>
+<div class="warn"><b>Part identity is lost</b>
+The simplifier merges by normal direction only. Two different parts (for example a solar-cell face and a Kapton face) that are coplanar and adjacent get merged into one side, and the CAD part or body name is not kept. Material assignment therefore needs either a per-part pass (simplify each STEP body separately, then concatenate) or a post-hoc spatial tagging step. Both are covered in the <a href="plan-cll-materials.html#geometry">plan</a>. <code>CHANGELOG_v2.7</code> also notes that <code>simplify_sides</code> emits far-away sliver centroids on SolarCat_v3; the 176-plate model was produced by a separate clustering script for that reason.</div>
+
+<h2>Vehicle cards</h2>
+<ul>
+<li><code>config/plant/vehicle.yaml</code> (six-beam hex, 0.750 kg), <code>vehicle_v3.yaml</code>, <code>vehicle_v3b.yaml</code>, <code>vehicle_v3c.yaml</code> (SolarCat_v3 with a 7 cm static margin, PCB position, trim mass). <code>vehicle.py</code> builds mass properties, rod axes and dipoles from them.</li>
+<li><code>cp_offset_m</code>: centroids are shifted to offset the centre of pressure from the CoM (a stated balance assumption).</li>
+<li><code>damage.py</code> (v11): membrane holes and tears scale plate areas mid-episode (<code>set_panels</code> is called again).</li>
+</ul>
+
+<h2>Not in the panel model</h2>
+<ul>
+<li>Materials, per-face optical or GSI properties, wall temperature per plate.</li>
+<li>Shadowing and shielding: no plate blocks another plate's sunlight or flow.</li>
+<li>Deformation (membrane billowing) and articulation (moving panels). Only the v11 damage area scaling exists.</li>
+</ul>
+
+<footer>ARLAMX v2.7 documentation · generated 2026-09-30 from the source tree (cpp/, python/arlamx_v2/, config/). Equations render with KaTeX when online; offline they show as TeX.</footer>
+</main>
+</div>
+</body>
+</html>

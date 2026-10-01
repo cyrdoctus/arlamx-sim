@@ -1,0 +1,122 @@
+# Magnetorquer power and the spacecraft power budget — SC_v8.
+#
+# Equations and the reason this file exists: python/arlamx_v2/power.py.
+# Short version: up to v7 the env charged actuation as P = 0.270 W * effort,
+# LINEAR in torque. A coil dissipates I^2 R and its dipole is proportional to I,
+# so P is proportional to tau^2. At the duty the v7 policies actually ran that
+# is a 180-600x overcharge, and it also ignores the field geometry entirely.
+#
+# Tags: [SPEC] datasheet · [ASSUME] engineering estimate · [V7] legacy value
+
+name: power_mtq_v8
+
+magnetorquers:
+  # "quadratic" = physical model, eq. (P1)-(P2). "legacy_linear" reproduces the
+  # SC_v7 behaviour exactly, for a like-for-like comparison against the v7
+  # bake-off numbers.
+  model: quadratic
+
+  # =========================================================================
+  # CUSTOM WOUND COILS — sized for control authority down to 300 km
+  # =========================================================================
+  # SC_v7 flew catalogue parts (CubeSpace CR0006 0.6 A*m^2 X/Y, EXA MT01 0.19
+  # A*m^2 Z) giving 18/18/5.7 uN*m. Those are NOT adequate at 300 km: the
+  # worst-case aerodynamic torque there is 32-64 uN*m, so the vehicle would be
+  # uncontrollable in a storm at its own lower bound. These are wound in house.
+  #
+  # ---- REQUIREMENT -------------------------------------------------------
+  #   altitude            300 km (mission lower bound)
+  #   atmosphere          MSIS F10.7 = 250, Ap = 180 (extreme storm)
+  #                       -> rho = 7.47e-11 kg/m^3
+  #   attitude            broadside sail, 0.65 m^2, Cd 2.2  (worst case)
+  #   speed               7726 m/s
+  #   drag force          3.19 mN
+  #   cp-cm offset        1.0 cm   [ASSUME - BALANCE REQUIREMENT, see note]
+  #   disturbance torque  31.9 uN*m
+  #   design margin       x1.20
+  #   -> required torque  38.2 uN*m
+  #   field               25.96 uT  (magnetic equator at 300 km = WEAKEST)
+  #   -> required dipole  1.473 A*m^2
+  #
+  #   NOTE ON BALANCE: torque is LINEAR in the cp-cm offset, so the coil power
+  #   goes as its SQUARE. Halving the offset quarters the coil power. Mass
+  #   balance buys more than copper does — 1 cm is a requirement on the bus
+  #   layout, not an observation. If 2 cm is the best achievable, every dipole
+  #   below doubles and every power figure quadruples.
+  #
+  # ---- PER-AXIS SPLIT ----------------------------------------------------
+  #   Broadside drag acts along the sail normal (body Z). tau = r_cp x F then
+  #   lands in the X-Y PLANE, so X and Y carry the load and Z sees only the
+  #   tangential/shear term (bounded at 30 % of the normal term).
+  #
+  # ---- AS-BUILT DESIGN ---------------------------------------------------
+  #   X, Y : ferrite rod 20 cm x 4 mm, L/D = 50, mu_eff = 648
+  #          (mu_eff = mu_r/(1 + N_d(mu_r-1)); a stubby rod is useless — at
+  #           L/D = 10 mu_eff collapses to 49)
+  #          2800 turns x 0.30 mm Cu, R = 25.6 ohm at 80 C
+  #          I = 64.6 mA, V = 1.66 V, P = 107 mW, J = 0.9 A/mm^2
+  #          mass 67.8 g each (55.7 g Cu + 12.1 g core)
+  #   Z    : air-core loop on the sail perimeter, 0.60 m^2 enclosed
+  #          30 turns x 0.20 mm Cu, 90 m of wire, R = 59.0 ohm at 80 C
+  #          I = 24.6 mA, V = 1.45 V, P = 35.6 mW, J = 0.8 A/mm^2, mass 25 g
+  #
+  #   Resistances are quoted HOT (80 C, rho_Cu = 2.06e-8) so the power figures
+  #   are worst case. Current density stays under 1 A/mm^2 — conservative for
+  #   vacuum, where there is no convective cooling.
+  #
+  # ---- MASS: THE BINDING CONSTRAINT --------------------------------------
+  #   Total 161 g = 25.7 % of the 625 g vehicle. For a fixed rod geometry the
+  #   product (power x copper mass) is invariant, so this can only be traded,
+  #   not reduced:
+  #        P_full 150 mW -> 252 g (40.3 %)
+  #        P_full 200 mW -> 195 g (31.1 %)
+  #        P_full 250 mW -> 161 g (25.7 %)   <-- selected
+  #        P_full 300 mW -> 138 g (22.1 %)
+  #   Selected at 250 mW: 1.8x power headroom while sunlit, and the mass is the
+  #   lowest that keeps that headroom. FLAGGED: 25.7 % of vehicle mass in
+  #   actuators is high and should be reviewed against the real mass budget.
+  # =========================================================================
+  dipole_max_Am2: [1.473, 1.473, 0.442]     # [DERIVED] see requirement above
+  power_peak_W: [0.1069, 0.1069, 0.0356]    # [DERIVED] I^2 R at 80 C, as-built
+
+  # Reference field is the WEAKEST the vehicle will see in the operating band
+  # (300 km magnetic equator), so the plant never assumes authority the coils
+  # cannot deliver. Over the poles the same dipoles give 2x these torques.
+  b_ref_T: 2.5963e-5                         # [DERIVED] tilted dipole @300 km eq
+  torque_max_Nm: [3.824350e-5, 3.824350e-5, 1.147565e-5]  # [DERIVED] = dipole * b_ref (exact)
+  #                = [38.24, 38.24, 11.47] uN*m   (SC_v7 was [18, 18, 5.7])
+
+  # Only used when model == legacy_linear.
+  legacy_peak_W: 0.270                       # [V7]
+
+# ---------------------------------------------------------------------------
+# The rest of the load budget (unchanged from v7 unless noted)
+# ---------------------------------------------------------------------------
+loads_W:
+  housekeeping: 0.007       # [V7] always on
+  sunlit_avionics: 0.205    # [V7] added while illuminated
+  downlink: 0.400           # [V7] added during a pointed, lit pass
+
+generation:
+  panel_peak_W: 0.780       # [V7]
+  efficiency: 0.85          # [V7]
+
+storage:
+  capacity_Wh: 0.53         # [V7] supercap
+  soc_initial: 0.5          # [V7]
+
+# ---------------------------------------------------------------------------
+# Vehicle mass properties
+# ---------------------------------------------------------------------------
+# Mass 0.625 kg CONFIRMED by the user 2026-08-20 (was an open 0.625-vs-0.750
+# question). The coil sizing above, the inertia below, and the v8+ training
+# mass all use this one number; the env no longer randomises mass for v8+.
+vehicle:
+  mass_kg: 0.625                            # [CONFIRMED 2026-08-20] user decision
+  inertia_diag_kgm2: [0.0125, 0.0125, 0.025]  # consistent with 0.625 kg
+  # cp-cm offset the coils were sized against, applied to the panel centroids
+  # for v8+ so the SIMULATED disturbance is the one the actuators exist to
+  # fight (grok critique 2.3: the symmetric hex geom otherwise has only a
+  # tens-of-nN*m shear residual, and the sizing story is fiction in-sim).
+  # v3-v7 keep the symmetric geometry byte-for-byte.
+  cp_offset_m: [0.01, 0.0, 0.0]             # [ASSUME] balance requirement, body X

@@ -1,0 +1,35 @@
+# Sampling MPC v3 — FROZEN 2026-08-23T18:05:29Z.
+# Winner of tune_mpc_v3 (id=G_H6_R8_cd0.5_sl0.5_gs2_ga1_pl4_k6_pb1_gp0.5_mc40, score20=1.0).
+# Sensors ON. Outputs live in outputs/mpc/ (v8 tree not written).
+# Dipole 8-bit: not in the plant.
+name: mpc_v3
+horizon_steps: 6
+n_random: 8
+max_cmd_deg: 40.0
+advisor_step_s: 300.0
+use_sun_ephemeris: true
+soc_lo: 0.4
+soc_hi: 0.6
+soc_k: 6.0
+weights:
+  power_band: 1.0
+  power_low_pen: 4.0
+  gs: 2.0
+  gs_pen: 0.5
+  gs_align: 1.0
+  cd: 0.5
+  slew: 0.5
+sensors:
+  enabled: true
+  soc_sigma: 0.005
+dipole_quant_bits: null
+u575_ms: 6.805035714285713
+u575_ms_actual: 13.437285714285716
+tune:
+  id: G_H6_R8_cd0.5_sl0.5_gs2_ga1_pl4_k6_pb1_gp0.5_mc40
+  score20: 1.0
+  u575_ms: 6.805035714285713
+  u575_ms_actual: 13.437285714285716
+  date: '2026-08-23T18:05:29Z'
+  protocol: "20-orbit \xD7 3 probes \xD7 2 seeds, sensors on, v8a"
+  budget_ms: 15.0

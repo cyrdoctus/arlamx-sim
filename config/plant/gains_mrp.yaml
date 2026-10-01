@@ -1,0 +1,77 @@
+# MRP-feedback controller gains — SC_v8 retune for gradual control.
+#
+# Control law (cpp/src/control/mrp_feedback.cpp, Schaub & Junkins Ch. 8):
+#
+#     tau = -kp * sigma_err - kd * omega_err + omega x I omega          (C1)
+#
+# Correct small-angle linearisation (grok critique 2.4 — the first draft
+# treated sigma as the angle and got the factors wrong). With sigma ~ Phi/4
+# and sigma_dot ~ omega/4, the per-axis Euler-angle loop is
+#
+#     I * Phi_ddot + kd * Phi_dot + (kp/4) * Phi = 0
+#
+#     omega_n = sqrt(kp / (4*I))        [rad/s]                          (C2)
+#     zeta    = kd / sqrt(kp * I)                                        (C3)
+#     settling time (2 %) ~= 4 / (zeta * omega_n) = 16*I/(4*kd)          (C4)
+#
+# I = diag(0.0125, 0.0125, 0.025) kg*m^2 for SolarCat.
+#
+# --------------------------------------------------------------------------
+# Why these values changed
+# --------------------------------------------------------------------------
+# The SC_v7 stage-S4 winner used kp = 1.0e-4, kd = 2.0e-3: on X/Y that is
+# omega_n = 0.045 rad/s (~141 s period), zeta = 1.79 — already overdamped, but
+# stiff enough that the loop burns its slew at the start of each 300 s advisor
+# step and then sits, which is the behaviour that ran PPO's actuator duty to
+# 332 J in the v7 bake-off.
+#
+# v8 lowers both gains so the response is spread across the whole step:
+#
+#          axis      kp        kd       omega_n     period   zeta     regime
+#   v7     X/Y   1.0e-4    2.0e-3     0.045 rad/s   141 s    1.79   overdamped
+#   v8     X/Y   6.0e-5    1.6e-3     0.035 rad/s   181 s    1.85   overdamped
+#   v8     Z     6.0e-5    1.6e-3     0.024 rad/s   256 s    1.31   overdamped
+#
+# All axes are OVERDAMPED by design: no overshoot, no ringing, torque spread
+# gradually — which is exactly the "gradual control capability" the v8 brief
+# asked for. (An earlier version of this table used omega_n = sqrt(kp/I) and
+# claimed zeta ~ 0.9 critically-damped; that used the wrong linearisation.
+# The settling time was accidentally right because the factors cancel in C4.)
+# The 3x3 sweep below exists to confirm this choice empirically.
+#
+# Tags: [V7] inherited · [TUNED] changed with reason · [ASSUME] needs burn-in
+name: mrp_gains_v8
+
+# Scalar gains applied to all three axes (the C++ controller takes scalars).
+kp: 6.0e-5        # [TUNED] was 1.0e-4 — gradual response, eq. (C2)
+kd: 1.6e-3        # [TUNED] was 2.0e-3 — zeta 1.85 on X/Y, overdamped, eq. (C3)
+
+# Actuator envelope.
+# v8+ env reads this file for kp / kd / gate_floor only. It does not read
+# max_body_rate_dps, max_torque_Nm, or max_slew_deg (those stay MTQ_RATE_DPS,
+# 40°, and power_mtq.yaml).
+#   v3–v7 catalogue hardware (CR0006 X/Y, MT01 Z at B ~ 3e-5 T):
+#     18 / 18 / 5.7 μN·m — env.py MTQ_TAU_NM / MTQ_M_MAX.
+#   v8+ custom coils: power_mtq.yaml dipole_max_Am2 and torque_max_Nm
+#     (38.24 / 38.24 / 11.47 μN·m at b_ref). The catalogue lines below are
+#     unused documentation, not the v8+ plant.
+max_body_rate_dps: 0.125      # [SPEC] CubeSpace/EXA rate; unused by env.py
+max_torque_Nm: [1.8e-5, 1.8e-5, 5.7e-6]   # [V7] catalogue; unused by env.py
+
+# Per-axis authority floor for v8+ only. v7 never opens this file and keeps
+# the historical 0.15 ctor default. An explicit env(gate_floor=...) wins.
+gate_floor: 0.3               # [V8] yaml default; not used by v3–v7
+
+# Slew clip per advisor decision.
+max_slew_deg: 40.0            # [V7]
+
+# --------------------------------------------------------------------------
+# Burn-in sweep grid. Not used by training; consumed by the S1-style gain probe
+# so the choice above can be confirmed rather than asserted.
+# --------------------------------------------------------------------------
+sweep:
+  kp: [4.0e-5, 6.0e-5, 1.0e-4]
+  kd: [1.2e-3, 1.6e-3, 2.0e-3]
+  # Winner = lowest mean tracking error whose actuator effort is within 1.3x of
+  # the cheapest arm. Same rule the SC_v7 stage S1 used.
+  effort_tolerance: 1.3       # [V7]

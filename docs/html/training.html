@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Training & sessions · ARLAMX v2.7</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false})"></script>
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX v2.7 docs</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7<small>spacecraft plant + deep-RL trainer</small></a>
+<h4>Start</h4>
+<a href="../guide/index.html">User guide</a>
+<a href="index.html">Overview</a>
+<a href="install.html">Install, build, test</a>
+<a href="architecture.html">Architecture & step loop</a>
+<h4>Physics</h4>
+<a href="aerodynamics.html">Free-molecular aerodynamics</a>
+<a href="srp.html">Solar & Earth radiation pressure</a>
+<a href="gravity.html">Gravity harmonics & third body</a>
+<a href="atmosphere.html">Atmosphere & space weather</a>
+<a href="attitude.html">Attitude, control, magnetics</a>
+<a href="geometry.html">Geometry & panel models</a>
+<h4>Deep RL</h4>
+<a href="training.html" class="active">Training & sessions</a>
+<a href="environment.html">Gym env, variants, rewards</a>
+<h4>Reference</h4>
+<a href="config.html">Configuration reference</a>
+<a href="api.html">Python / C++ API</a>
+<a href="validation.html">Validation & known limits</a>
+<h4>Plan</h4>
+<a href="plan-cll-materials.html">CLL + material model plan</a>
+</nav>
+<main>
+<h1>Training &amp; sessions</h1>
+<p class="lede">Everything runs through <code>python main.py</code>. A training session resolves the settings, writes a snapshot, builds vectorised envs, trains with Stable-Baselines3, and records the result.</p>
+
+<h2>Commands</h2>
+<pre><code>python main.py list                                             <span class="c"># every command and tool</span>
+python main.py train                                            <span class="c"># config/network.yaml + orbit.yaml + train.yaml</span>
+python main.py train --network config/network_quick.yaml        <span class="c"># smoke run (20k steps, 4 envs)</span>
+python main.py train --algo sac --arch 3x32 --timesteps 500000 --n-envs 16 --seed 7
+python main.py train --variant v11 --physics high --gsi cll --controller quaternion
+python main.py train --name storm --set orbit.training.ap=[100,200] --set network.ppo.learning_rate=1e-4
+python main.py train --set 'train.reward_w={dE_weight: 3.0}'
+python main.py train --backend v12 --arch 4x18 --timesteps 600000 --set train.v12.dual_eval=true
+python main.py train --variant v10r6                            <span class="c"># six rods, 6 on/off gates</span>
+python main.py train --from-snapshot outputs/snapshots/&lt;id&gt;.yaml [--timesteps N --seed S]
+python main.py sweep --config config/sweep.yaml [--force]
+python main.py snapshots
+python main.py quantize --in outputs/models/&lt;id&gt;/models/ppo_&lt;id&gt;.zip --out int8.zip
+python -m arlamx_v2.sc6mq --config config/sc_v2_6mq.yaml --steps 500000   <span class="c"># SolarCat six-rod trainer</span></code></pre>
+<p>Precedence: CLI flags and <code>--set section.key=value</code> (value parsed as YAML; sections <code>network</code>, <code>orbit</code>, <code>train</code>) override the YAML files. <code>--network/--orbit/--train FILE</code> swaps in a whole file.</p>
+
+<h2>Pipeline</h2>
+<ol>
+<li><b>Resolve</b> (<code>session.load_settings</code>): network, orbit and train YAMLs + overrides + the plant configs (physics, reward, gains, power, estimator, sensors) from <code>config/plant/</code>.</li>
+<li><b>Snapshot</b>: write <code>outputs/snapshots/&lt;MM-DD-HH-MM&gt;_&lt;ALGO&gt;_&lt;LxW&gt;[_name].yaml</code> <em>before</em> training. It holds status, command, replay command, versions, every resolved setting and, after the run, the result. Crashed runs are recorded too.</li>
+<li><b>Pin</b> (<code>config.pin</code>): plant configs are frozen in each worker (<code>ArlamxV2Env(frozen=…)</code>), so editing YAMLs mid-run has no effect.</li>
+<li><b>Envs</b>: <code>SubprocVecEnv</code> (n_envs &gt; 1) of <code>Monitor(ArlamxV2Env(seed=seed+rank, variant, **env_kw))</code>, wrapped in <code>VecNormalize</code> (reward-only by default).</li>
+<li><b>Model</b>: SB3 <code>MlpPolicy</code> with <code>net_arch</code> = [width] × layers (PPO: separate π and V of the same shape).</li>
+<li><b>Outputs</b>: <code>outputs/models/&lt;id&gt;/models/&lt;algo&gt;_&lt;id&gt;.zip</code>, <code>vecnormalize.pkl</code>, <code>logs/</code> (TensorBoard), <code>metrics.json</code>. The v12 backend adds <code>best/</code>, <code>ckpts/</code>, <code>eval_curve.csv</code>, <code>BEST.md</code>.</li>
+</ol>
+
+<h2>Backends</h2>
+<table>
+<thead><tr><th>Backend</th><th>What it does</th></tr></thead>
+<tbody>
+<tr><td><code>train</code></td><td>Plain SB3 (PPO / SAC / TD3) on the env reward for the chosen variant.</td></tr>
+<tr><td><code>v12</code></td><td>PPO only. Env v10 + <code>V12Wrapper</code> (slew term, MPC-scored comparator, w_env, wrong-way clip, climate mix, low-SoC terms), with a checkpoint and a 10-orbit eval against the MPC references every 50k steps. Knobs are under <code>train.v12</code>.</td></tr>
+</tbody>
+</table>
+
+<h2>Default hyperparameters (<code>config/network.yaml</code>)</h2>
+<table>
+<thead><tr><th>Block</th><th>Values</th></tr></thead>
+<tbody>
+<tr><td>session</td><td>algo ppo, 4 × 16, 300 000 steps, 32 envs, seed 42</td></tr>
+<tr><td>ppo</td><td>lr 3e-4, n_steps 128, batch 64, 10 epochs, γ 0.99, ent 0.003, clip 0.2, λ 0.95</td></tr>
+<tr><td>sac / td3</td><td>lr 3e-4, buffer 100 000, batch 256, γ 0.99, τ 0.005</td></tr>
+<tr><td>vecnormalize</td><td>norm_obs false, norm_reward true, clip_reward 10, γ 0.99</td></tr>
+</tbody>
+</table>
+<p>The networks are deliberately tiny (4×16 … 4×20) because the target is an onboard STM32U575 (see <code>inference_budget.py</code>). Training is FP32. INT8 is a separate step: <code>quantize.py</code> gives dynamic INT8 of the actor Linear layers, and <code>int8.py</code> gives an integer-only actor with a tanh LUT.</p>
+
+<h2>Sweeps</h2>
+<pre><code><span class="c"># config/sweep.yaml</span>
+name: example
+base: {network.timesteps: 100000, network.n_envs: 8, train.variant: v8a}
+grid: {network.algo: [ppo, sac], train.controller: [mrp, quaternion]}   <span class="c"># 4 sessions</span>
+<span class="c"># arms: [{train.physics: high}, {network.width: 32}]                     # or an explicit list</span></code></pre>
+<p>Each arm is a normal session with its own snapshot. The ledger is <code>outputs/results/sweeps/&lt;name&gt;.csv</code>, and arms already marked done are skipped unless you pass <code>--force</code>.</p>
+
+<h2>Replaying a snapshot</h2>
+<p><code>--from-snapshot</code> replays exactly, with the plant values pinned. Network or orbit changes keep the snapshot's plant. Changing <code>train.variant</code>, <code>backend</code>, <code>physics</code>, <code>gsi</code> or <code>reward_w</code> re-reads the plant from <code>config/plant/</code>.</p>
+
+<h2>Physics fidelity for training</h2>
+<table>
+<thead><tr><th>Preset</th><th>SH degree</th><th>Lunisolar</th><th>GSI</th><th>Field</th><th>MSIS interp</th><th>Use</th></tr></thead>
+<tbody>
+<tr><td><code>fast</code></td><td>2</td><td>off</td><td>Sentman</td><td>dipole</td><td>off</td><td>smoke tests, quick sweeps</td></tr>
+<tr><td><code>standard</code></td><td>4</td><td>off</td><td>Sentman α_E 0.93</td><td>WMM</td><td>on</td><td>default training</td></tr>
+<tr><td><code>high</code></td><td>8</td><td>on</td><td>Walker-CLL α_N 0.93</td><td>WMM</td><td>on</td><td>fidelity checks, final evals</td></tr>
+</tbody>
+</table>
+<div class="note"><b>Sim-to-real practice</b>
+Train on <code>standard</code> with domain randomisation (weather envelope, damage, SRP flashes, sensors), then evaluate on <code>high</code>. Once materials exist (see the <a href="plan-cll-materials.html">plan</a>), randomise accommodation and optical coefficients per episode within their uncertainty bands rather than training on one point value.</div>
+
+<h2>Other tools</h2>
+<table>
+<thead><tr><th>Group</th><th>Tools</th></tr></thead>
+<tbody>
+<tr><td><code>sim</code></td><td>decay_run, aoa_decay, lift_drag_study, srp_assess, srp_f107_sweep, optics_run, advisor_run, validate_attitudes, plot_simplify, geometry</td></tr>
+<tr><td><code>eval</code></td><td>mc_decay, mc_v12, mc_four, damage_eval, analyze_ood, eval_v4, check_mpc_ref, inference_budget</td></tr>
+<tr><td><code>plot</code></td><td>plot_v8, plot_v12, plot_v14fix, plot_production, plot_gradient70, showcase_plots, slides, ipc_animation, report_v8, build_mpc_report</td></tr>
+<tr><td><code>legacy</code></td><td>bench_v8, campaign, tune_mpc, gradient70 (write into <code>outputs/.old</code>)</td></tr>
+</tbody>
+</table>
+<p class="small">These tools run immediately with no flags: inference_budget, plot_v14fix, plot_production, plot_gradient70, showcase_plots, slides, ipc_animation, report_v8, build_mpc_report, gradient70.</p>
+
+<footer>ARLAMX v2.7 documentation · generated 2026-09-30 from the source tree (cpp/, python/arlamx_v2/, config/). Equations render with KaTeX when online; offline they show as TeX.</footer>
+</main>
+</div>
+</body>
+</html>

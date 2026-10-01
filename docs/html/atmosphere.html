@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atmosphere & space weather · ARLAMX v2.7</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false})"></script>
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX v2.7 docs</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7<small>spacecraft plant + deep-RL trainer</small></a>
+<h4>Start</h4>
+<a href="../guide/index.html">User guide</a>
+<a href="index.html">Overview</a>
+<a href="install.html">Install, build, test</a>
+<a href="architecture.html">Architecture & step loop</a>
+<h4>Physics</h4>
+<a href="aerodynamics.html">Free-molecular aerodynamics</a>
+<a href="srp.html">Solar & Earth radiation pressure</a>
+<a href="gravity.html">Gravity harmonics & third body</a>
+<a href="atmosphere.html" class="active">Atmosphere & space weather</a>
+<a href="attitude.html">Attitude, control, magnetics</a>
+<a href="geometry.html">Geometry & panel models</a>
+<h4>Deep RL</h4>
+<a href="training.html">Training & sessions</a>
+<a href="environment.html">Gym env, variants, rewards</a>
+<h4>Reference</h4>
+<a href="config.html">Configuration reference</a>
+<a href="api.html">Python / C++ API</a>
+<a href="validation.html">Validation & known limits</a>
+<h4>Plan</h4>
+<a href="plan-cll-materials.html">CLL + material model plan</a>
+</nav>
+<main>
+<h1>Atmosphere &amp; space weather</h1>
+<p class="lede">Density, temperature, mean molecular mass and species fractions from NRLMSIS, driven by F10.7 and Ap. Those two indices are randomised and made to jump during training episodes.</p>
+<p class="small">Source: <code>python/arlamx_v2/atmosphere.py</code> (<code>query_msis</code>), <code>env.py</code> (<code>_atmo_at</code>, <code>reset</code>, <code>_plan_jumps</code>, <code>_apply_jumps</code>), plant hooks <code>Simulator.set_atmosphere</code> / <code>set_atmosphere_end</code>. There is no atmosphere model inside the C++ plant.</p>
+
+<h2>MSIS query</h2>
+<ul>
+<li>Library: <code>pymsis</code>. <code>atmosphere.model</code> = <code>msis21</code> (NRLMSIS 2.1, the default), <code>nrlmsise00</code> (version 0), or <code>constant</code> (<code>atmosphere.constant: {rho, T, m_bar}</code>).</li>
+<li>Where: <b>geodetic</b> height and latitude (Bowring, WGS-84) and Earth-fixed longitude (GMST rotation) of the spacecraft.</li>
+<li>When: the start of every advisor step (every 300 s). With <code>atmosphere.interp: true</code> (standard and high) a second query runs at the position predicted by the FP32 propagator for t + 300 s. The plant interpolates ρ, T, m̄ and χ linearly across the 150 substeps. That is 2 MSIS calls per decision instead of 150.</li>
+<li>Returned: ρ (kg/m³), temperature T (the MSIS local temperature at altitude, index 10), \(\bar m=\sum n_im_i/\sum n_i\) over He, O, N₂, O₂, Ar, H, N, and optionally the mole fractions χ in the Walker order (He, O, N₂, O₂, Ar, H, N). Anomalous O is folded into O and NO is dropped.</li>
+<li>Safety: if pymsis throws, the process falls back to ρ = 3e-12, T = 900 K for the rest of the run and warns once. Out-of-range results (ρ ≥ 1e-8, T ∉ (150, 4000) K, m̄ outside bounds) are replaced by ρ = 1e-13, T = 600 K.</li>
+</ul>
+
+<h2>Space-weather inputs</h2>
+<div class="eq">\[
+\texttt{f107s}=\texttt{f107as}=F_{10.7},\qquad \texttt{aps}=[A_p]\times 7\ \ \text{(scalar)}\quad\text{or}\quad [\text{daily},\ 3\mathrm h,\ -3,\ -6,\ -9\,\mathrm h,\ \overline{-12..-33},\ \overline{-36..-57}]
+\]</div>
+<ul>
+<li>A scalar Ap fills all 7 slots (steady-Ap, daily mode). A length-7 history switches MSIS to storm-time mode (<code>geomagnetic_activity = −1</code>). <code>query_msis</code> supports this, but <b>the env always passes a scalar</b>.</li>
+<li>The 81-day centred mean F10.7a is set equal to the daily F10.7. Real conditions often differ by 20–40 % between the two, and MSIS density responds to both.</li>
+</ul>
+
+<h2>How space weather is made dynamic in training</h2>
+<table>
+<thead><tr><th>Variant</th><th>Draw at reset</th><th>Jumps per episode</th><th>Jump size</th><th>Clip</th></tr></thead>
+<tbody>
+<tr><td>v3</td><td>F10.7 U(80, 200), Ap U(2, 15)</td><td>none (static per episode)</td><td>—</td><td>—</td></tr>
+<tr><td>v4–v9</td><td>F10.7 U(65, 250), Ap U(2, 40)</td><td>1–4</td><td>ΔF ±80, ΔAp −20…+35</td><td>F [65, 250], Ap [2, 80]</td></tr>
+<tr><td>v10, v11, v10r6 (and the v12–v14 wrappers)</td><td>F10.7 U(5, 250), Ap U(2, 200)</td><td>2–8</td><td>ΔF ±150, ΔAp −60…+150</td><td>F [5, 250], Ap [2, 200]</td></tr>
+</tbody>
+</table>
+<ul>
+<li><code>config/orbit.yaml → training.f107 / ap</code> overrides the ranges (<code>[lo, hi]</code>, a number, or <code>null</code>). <code>reset(options={"f107":…, "ap":…})</code> pins them for evaluation.</li>
+<li>Jumps are applied at the start of the scheduled step and then held. They are step changes, not a physical storm profile (no ~1–3 day recovery), and there is no thermosphere time lag.</li>
+<li>The v14b "climate mix" (40 % quiet / 35 % gradual + spikes / 25 % storm) is a wrapper-level re-draw in <code>train_v12.py</code>.</li>
+</ul>
+<div class="warn"><b>F10.7 below ~65 sfu is unphysical</b>
+The v10 envelope floor of F10.7 = 5 sfu is below the observed solar-minimum floor (≈ 63–65 sfu) and outside the conditions MSIS was fitted on. Densities there are extrapolations. That is useful as a domain-randomisation stressor, but do not quote it as a real solar condition.</div>
+
+<h2>Wind</h2>
+<p><code>v_rel = v − ω⊕ × r − v_wind</code>. <code>Simulator.set_wind(w_N)</code> sets a constant inertial wind. It is zero by default because no cited horizontal wind model (HWM14) is wired in.</p>
+
+<h2>Configuration</h2>
+<table>
+<thead><tr><th>Key</th><th>Default</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>atmosphere.model</code></td><td>msis21</td><td>msis21 | nrlmsise00 | constant</td></tr>
+<tr><td><code>atmosphere.f107</code>, <code>ap</code></td><td>150, 4</td><td>seed values for the plant. Env resets overwrite them from the envelope.</td></tr>
+<tr><td><code>atmosphere.corotating</code></td><td>true</td><td>co-rotating atmosphere</td></tr>
+<tr><td><code>atmosphere.interp</code></td><td>true (fast: false)</td><td>second MSIS sample at step end, linear in time</td></tr>
+<tr><td><code>atmosphere.constant</code></td><td>—</td><td><code>{rho, T, m_bar}</code> for <code>model: constant</code></td></tr>
+<tr><td><code>orbit.training.f107 / ap</code></td><td>[5, 250] / [2, 200]</td><td>training envelope</td></tr>
+<tr><td><code>orbit.simulation.f107 / ap</code></td><td>150 / 4</td><td>decay-run values</td></tr>
+</tbody>
+</table>
+
+<h2>What a “real space weather” mode would need</h2>
+<p>This is not implemented. It is listed because you asked for dynamic space weather.</p>
+<ol>
+<li>A reader for CelesTrak <code>SW-All.csv</code> (observed daily F10.7 adjusted/observed, 81-day centred average, 8 × 3-hour Kp/Ap, daily Ap). It could also read the NOAA SWPC 45-day forecast for predictive runs.</li>
+<li>Per step: pass daily F10.7 of the previous day, the 81-day mean, and the 7-element Ap history built from the 3-hour Ap series. <code>query_msis</code> already accepts the history.</li>
+<li>Training: sample episode start dates from the record (a solar-cycle-weighted draw) instead of uniform indices. This gives realistic storm onsets, recoveries and F10.7/F10.7a correlations.</li>
+</ol>
+<p>This is roughly 1–2 days of work plus tests, and it is independent of the CLL/material work.</p>
+
+<h2>References</h2>
+<ol class="small">
+<li>Emmert, J. T. et al. (2021). NRLMSIS 2.0. <i>Earth Space Sci.</i> 8, e2020EA001321.</li>
+<li>Picone, J. M. et al. (2002). NRLMSISE-00. <i>JGR</i> 107(A12), 1468.</li>
+<li>Vallado, D. A. &amp; Kelso, T. S. (2013). Earth orientation parameter and space weather data for flight operations. AAS 13-373 (CelesTrak SW format).</li>
+</ol>
+
+<footer>ARLAMX v2.7 documentation · generated 2026-09-30 from the source tree (cpp/, python/arlamx_v2/, config/). Equations render with KaTeX when online; offline they show as TeX.</footer>
+</main>
+</div>
+</body>
+</html>

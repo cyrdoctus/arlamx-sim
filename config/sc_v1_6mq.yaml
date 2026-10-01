@@ -1,0 +1,27 @@
+# SC_v1_6mq: SolarCat_v3, six beam rods, v13 reward terms rebalanced (python/arlamx_v2/sc6mq.py).
+variant: v10r6
+vehicle: vehicle_v3
+sensors: sensors_gaussian
+mtq_duty: 0.8            # rods on 80 % of each substep, magnetometer reads in the 20 % gap
+gains: {kp: 7.44e-5, kd: 2.23e-3}   # MRP PD, wn 0.02 rad/s, zeta 1.2 (analysis/tune_mrp*.json)
+orbit:                   # narrow training band, dynamic space weather (v10 storms on top)
+  altitude_km: [350, 450]
+  inc_deg: [20, 30]
+  ecc: [0.0, 0.005]
+  f107: [70, 250]
+  ap: [2, 120]
+  episode_orbits: 30
+sun_sigma: 0.05          # panel-current sun vector noise (per axis, unit vector)
+weights:                 # every term is bounded in [-1, 1] before its weight
+  base: 0.5              # env v10 composite (~ -2 per step raw; halved so the shaping terms count)
+  slew: 0.3              # v13: 0.5
+  env: 0.4               # v13: 0.15 -> use the environmental torque more
+  rest: 0.25             # rods off while tracking (< 15 deg)
+  ecl_drag: 0.6          # eclipse: stay at min drag
+  ecl_mtq: 0.6           # eclipse: minimum rod power
+  downlink: 0.6          # pointed pass
+  band: 0.1              # SoC in [0.4, 0.6]
+  low: 0.8               # SoC below low_thr
+  brownout: 1.5
+slew_deg: 2.0
+low_thr: 0.25

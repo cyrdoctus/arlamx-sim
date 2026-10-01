@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Python / C++ API · ARLAMX v2.7</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false})"></script>
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX v2.7 docs</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7<small>spacecraft plant + deep-RL trainer</small></a>
+<h4>Start</h4>
+<a href="../guide/index.html">User guide</a>
+<a href="index.html">Overview</a>
+<a href="install.html">Install, build, test</a>
+<a href="architecture.html">Architecture & step loop</a>
+<h4>Physics</h4>
+<a href="aerodynamics.html">Free-molecular aerodynamics</a>
+<a href="srp.html">Solar & Earth radiation pressure</a>
+<a href="gravity.html">Gravity harmonics & third body</a>
+<a href="atmosphere.html">Atmosphere & space weather</a>
+<a href="attitude.html">Attitude, control, magnetics</a>
+<a href="geometry.html">Geometry & panel models</a>
+<h4>Deep RL</h4>
+<a href="training.html">Training & sessions</a>
+<a href="environment.html">Gym env, variants, rewards</a>
+<h4>Reference</h4>
+<a href="config.html">Configuration reference</a>
+<a href="api.html" class="active">Python / C++ API</a>
+<a href="validation.html">Validation & known limits</a>
+<h4>Plan</h4>
+<a href="plan-cll-materials.html">CLL + material model plan</a>
+</nav>
+<main>
+<h1>Python / C++ API</h1>
+<p class="lede">The compiled module is imported as <code>from arlamx_v2 import cpp</code> (it wraps <code>arlamx_cpp</code>). Vectors are numpy arrays of length 3, and quaternions are scalar-first [q0, q1, q2, q3].</p>
+
+<h2>Simulator</h2>
+<pre><code>p = cpp.SimParams(); p.gsi = "cll"; p.lunisolar = True
+sim = cpp.Simulator(p)
+sim.load_gravity(path) -> bool      sim.load_wmm(path) -> bool      sim.load_spice([kernels]) -> bool
+sim.set_panels(n (N,3), A (N,), c (N,3))
+sim.set_mass(m); sim.set_inertia_diag([Ix, Iy, Iz]); sim.set_inertia(I 3x3)
+sim.set_atmosphere(rho, T, m_bar, chi=None)       <span class="c"># chi: 7 mole fractions He,O,N2,O2,Ar,H,N</span>
+sim.set_atmosphere_end(rho, T, m_bar, chi=None)   <span class="c"># linear interpolation over the next step</span>
+sim.set_mode("point" | "detumble" | "prescribed")
+sim.set_cmd_frame("inertial" | "flow" | "flowB" | "flowS"); sim.set_nav(r, v); sim.clear_nav()
+sim.set_srp_scale(s); sim.set_wind(w_N)
+sim.set_controller(cpp.MRPFeedback); sim.set_quat_controller(cpp.QuaternionFeedback); sim.set_bdot(cpp.BDot())
+sim.set_dipole_max(m_max); sim.set_rods(axis (N,3), dmax (N,)); sim.set_rod_gates([bool]*N)
+st  = sim.reset(r, v, sigma, omega)                <span class="c"># dict r, v, sigma, omega, t</span>
+out = sim.step(q_cmd)                              <span class="c"># dict, see Architecture → StepOut</span>
+sim.get_state()                                    <span class="c"># r, v, sigma, omega, t, C_BN, sun_N, eclipse, altitude_km</span>
+sim.params(); sim.gravity_loaded(); sim.wmm_loaded(); sim.dipole_max(); sim.rod_gates()</code></pre>
+
+<h2>Force-model kernels</h2>
+<table>
+<thead><tr><th>Function</th><th>Returns</th></tr></thead>
+<tbody>
+<tr><td><code>sentman(theta, s, Tw_Ti, alpha_E=1)</code></td><td>(C_p, C_τ) for one plate</td></tr>
+<tr><td><code>cll(theta, s, Tw_Ti, alpha_n=1, alpha_t=1)</code></td><td>(C_p, C_τ), Walker atomic-O row</td></tr>
+<tr><td><code>spacecraft_aero(n, A, c, v_rel_B, rho, T, m_bar, T_w, alpha_E=1, one_sided_ref=True, gsi="sentman", alpha_n=1, alpha_t=1, chi=None)</code></td><td>dict F, tau, Cd, Cl, A_ref</td></tr>
+<tr><td><code>coefficients_only(...)</code></td><td>same, per unit q</td></tr>
+<tr><td><code>panel_srp_optical(n, A, c, sun_hat_B, ca, cs, cd, eclipse=1, pressure=0)</code></td><td>(F, τ). pressure 0 → P_SR.</td></tr>
+<tr><td><code>panel_srp_force_torque(n, A, c, sun_hat_B, eclipse=1, pressure=0, Cr=0)</code></td><td>(F, τ), cannonball</td></tr>
+<tr><td><code>earth_rad(n, A, c, nadir_B, r_m, cos_sun, p_sun, sol=(ca,cs,cd), ir=(ca,cs,cd))</code></td><td>(F, τ)</td></tr>
+<tr><td><code>gg_torque(I_diag, r_B, mu)</code></td><td>τ_gg</td></tr>
+</tbody>
+</table>
+
+<h2>Orbit, frames, ephemeris</h2>
+<table>
+<thead><tr><th>Function</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>accel_twobody(r, mu)</code>, <code>accel_j2(r, mu, Re, J2)</code>, <code>accel_j3(...)</code></td><td>closed forms</td></tr>
+<tr><td><code>GravityHarmonics().load_ggm(path, max_degree=20)</code>, <code>.accel_ecef(r, deg)</code>, <code>.mu()</code>, <code>.Re()</code>, <code>.J2()</code></td><td>SH model</td></tr>
+<tr><td><code>accel_third_body(r_sat, r_body, mu_body)</code></td><td>point-mass perturbation</td></tr>
+<tr><td><code>sun_unit_analytic(jd)</code>, <code>sun_dist_au(jd)</code>, <code>moon_analytic(jd) -> (r_hat, r_m)</code></td><td>analytic ephemerides</td></tr>
+<tr><td><code>eclipse_cylindrical(r, s_hat, Re)</code>, <code>gmst_rad(jd)</code>, <code>ecef_to_geodetic(r) -> (lat, lon, h)</code>, <code>sma_from_rv(r, v, mu)</code></td><td>geometry helpers</td></tr>
+<tr><td><code>propagate_f32_samples(r0, v0, offsets_s, dt_s=30, bc_inv=0, rho0=3e-12, alt0_m=4e5, h_scale=6e4, a_srp=0, sun_hat=None)</code></td><td>onboard FP32 forecast</td></tr>
+</tbody>
+</table>
+
+<h2>Attitude and control</h2>
+<table>
+<thead><tr><th>Item</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>mrp_to_dcm, mrp_shadow, mrp_rate, mrp_compose, mrp_error, mrp_angle</code></td><td>MRP algebra</td></tr>
+<tr><td><code>quat_mul, quat_conj, quat_unit, quat_normalize, slerp_clip, quat_to_mrp, mrp_to_quat, dcm_to_quat</code></td><td>quaternions (Hamilton, scalar first)</td></tr>
+<tr><td><code>MRPFeedback</code>, <code>QuaternionFeedback</code></td><td><code>kp, kd, max_body_rate, proper</code>; <code>set_inertia_diag</code>, <code>set_max_torque</code>, <code>compute(...)</code></td></tr>
+<tr><td><code>BDot</code></td><td><code>gain, dt, max_dipole</code>, <code>dipole(B)</code>, <code>reset()</code></td></tr>
+<tr><td><code>apply_magnetorquer(tau, B, m_max)</code>, <code>saturate_dipole</code>, <code>apply_rods(tau, B, axis, dmax, on)</code>, <code>rods_allocate(m, axis, dmax, on)</code></td><td>magnetic allocation</td></tr>
+<tr><td><code>WMM().load(path)</code>, <code>.field_ecef(r, year)</code>, <code>dipole_field_ecef(r)</code></td><td>field models</td></tr>
+</tbody>
+</table>
+<h2>Constants</h2>
+<p><code>MU_WGS, RE_WGS, OMEGA_EARTH, J2_GGM, K_B, P_SRP_1AU</code></p>
+
+<h2>Main Python modules</h2>
+<table>
+<thead><tr><th>Module</th><th>Entry points</th></tr></thead>
+<tbody>
+<tr><td><code>env.py</code></td><td><code>ArlamxV2Env</code></td></tr>
+<tr><td><code>physics.py</code></td><td><code>load(name|path|dict, overrides)</code>, <code>validate</code>, <code>apply_to_params(params, cfg, ...)</code>, <code>msis_version</code></td></tr>
+<tr><td><code>atmosphere.py</code></td><td><code>query_msis(alt_km, lat, lon, dt, f107, ap, version, return_species)</code>, <code>jd_to_datetime</code></td></tr>
+<tr><td><code>geometry.py</code></td><td><code>load_mesh</code>, <code>load_geom</code>, <code>write_geom</code>, <code>simplify_sides</code>, <code>projected_area</code></td></tr>
+<tr><td><code>sail_optics.py</code></td><td><code>PRESETS</code>, <code>apply_optics(params, name)</code></td></tr>
+<tr><td><code>session.py</code>, <code>train.py</code>, <code>train_v12.py</code>, <code>sweep.py</code></td><td>sessions, <code>train_one</code>, <code>build_model</code>, <code>train_run</code></td></tr>
+<tr><td><code>decay_run.py</code></td><td><code>coe_to_rv</code>, prescribed decay</td></tr>
+<tr><td><code>config.py</code></td><td><code>load</code>, <code>merge</code>, <code>load_reward</code>, <code>pin</code>, <code>snapshot</code></td></tr>
+</tbody>
+</table>
+
+<footer>ARLAMX v2.7 documentation · generated 2026-09-30 from the source tree (cpp/, python/arlamx_v2/, config/). Equations render with KaTeX when online; offline they show as TeX.</footer>
+</main>
+</div>
+</body>
+</html>

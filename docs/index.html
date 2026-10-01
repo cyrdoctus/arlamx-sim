@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARLAMX v2.7.5</title>
+<link rel="stylesheet" href="html/assets/style.css">
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7.5<small>documentation</small></a>
+<h4>Start</h4>
+<a href="index.html" class="active">Home</a>
+<a href="guide/index.html">User guide</a>
+<a href="html/index.html">Physics reference</a>
+<h4>Guide</h4>
+<a href="guide/commands.html">Commands</a>
+<a href="guide/fmf.html">Free-molecular flow</a>
+<a href="guide/control.html">Control loop and deep RL</a>
+<a href="guide/simplify.html">STL simplification</a>
+<a href="guide/libraries.html">Python libraries</a>
+</nav>
+<main>
+<h1>ARLAMX v2.7.5</h1>
+<p class="lede">A C++ spacecraft plant and a Python trainer for very-low and low Earth orbit. Open the user guide for commands and the three ways to run it. Open the physics reference for the equations.</p>
+
+<div class="grid">
+<div class="card"><h3><a href="guide/index.html">User guide</a></h3><p class="small">How to build, which command runs which study, free-molecular flow for a spacecraft, the onboard control loop, deep-RL training, STL simplification, and the Python libraries. Dark theme, no network needed.</p></div>
+<div class="card"><h3><a href="html/index.html">Physics reference</a></h3><p class="small">Sentman and Walker–CLL aerodynamics, radiation pressure, gravity, atmosphere, attitude laws, the Gym environment, configuration, and validation notes.</p></div>
+<div class="card"><h3><a href="guide/commands.html">Commands</a></h3><p class="small"><code>python main.py</code> is the front door: train, decay, sweep, quantize, and the simulation tools.</p></div>
+<div class="card"><h3>README</h3><p class="small">The repository <code>README.md</code> covers install, layout, and what git leaves out. This site is the part you read in a browser.</p></div>
+</div>
+
+<footer>ARLAMX v2.7.5 · MIT license (repository <code>LICENSE</code>). Spherical-harmonic gravity cites Basilisk, Autonomous Vehicle Systems Laboratory, University of Colorado Boulder. AI assistants used in development are listed in the repository file <code>AI_USE.md</code>. Development notes are in <a href="notes/README.md">notes/</a>.</footer>
+</main>
+</div>
+</body>
+</html>

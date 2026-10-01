@@ -1,0 +1,96 @@
+# SC_v8a — perturbation-assisted control DISABLED (the control arm).
+#
+# v8a and v8b differ in exactly one block: `delegation.enabled`. Every other
+# weight is identical, so the pair isolates the mechanism and nothing else.
+# Equations are in python/arlamx_v2/reward_v8.py (numbered) and restated in
+# docs/modules/14_reward_v8.md.
+#
+# Provenance tags:
+#   [V7]     carried over unchanged from the SC_v7 stage-S4 winner
+#   [TUNED]  changed for v8 with the reason given
+#   [ASSUME] new, no measurement behind it yet — burn-in should confirm
+name: SC_v8a
+variant: v8a
+
+# ---------------------------------------------------------------------------
+# Inherited SC_v7 composite (arlamx_v2.reward.compose_sc_v7)
+# ---------------------------------------------------------------------------
+v7:
+  # Battery band: reward for sitting in [band_lo, band_hi], exponential decay
+  # above it, linear penalty below, hard cost on depletion.
+  band_weight: 1.0            # [V7]
+  band_lo: 0.4                # [V7]
+  band_hi: 0.6                # [V7]
+  band_above_mode: exp        # [V7] stage-S4 winner used the exponential arm
+  band_decay_k: 6.0           # [V7]
+  band_above_slope: 2.0       # [V7] unused while band_above_mode == exp
+  band_low_weight: 4.0        # [V7]
+  band_depletion: 50.0        # [V7]
+
+  # Longevity. The v7 stage-S4 value was 3.5 and every learner at 250k steps
+  # converged on trading battery margin for drag (see the production bake-off
+  # report, finding 3). Backed off so the power terms are not outrun, with the
+  # altitude-margin barrier below picking up the longevity job instead.
+  dE_weight: 2.6              # [TUNED] was 3.5
+
+  # Downlink pointing tiers (deg -> credit multiplier).
+  gs_weight: 2.0              # [V7]
+  tier_deg: [2.0, 5.0, 10.0]  # [V7]
+  tier_scale: [1.0, 0.5, 0.25]  # [V7]
+  gs_penalty: 0.5             # [V7]
+
+  # Feasibility and regularisers.
+  feas_weight: 1.0            # [V7]
+  smooth_weight: 0.02         # [V7]
+  omega_weight: 0.002         # [V7]
+  momentum_weight: 0.001      # [V7]
+
+  # Actuation economy on real applied torque.
+  thrift_weight: 0.9          # [V7] stage-S4 winner
+
+  # Brownout recovery.
+  brownout_weight: 100.0      # [V7]
+  brownout_gen: 1.0           # [V7]
+
+# ---------------------------------------------------------------------------
+# v8 stability / storm resilience  (eq. 9-10)
+# ---------------------------------------------------------------------------
+stability:
+  # eq. (9) soft altitude barrier. Starts biting well above the 250 km cliff so
+  # margin is defended before a storm eats it, rather than after.
+  margin_weight: 4.0          # [ASSUME]
+  h_soft_km: 320.0            # [ASSUME] ~70 km of margin over the cliff
+  h_floor_km: 250.0           # [V7] same floor as the altitude_cliff term
+
+  # eq. (10) penalise jerk in the orbit-energy rate. This is what a storm does
+  # to the vehicle, and what "decrease the impact when storm hits" means
+  # operationally: the policy should not let dE swing step to step.
+  decay_stab_weight: 0.6      # [ASSUME]
+  # [DERIVED] Measured on the reference orbit: |dE| ~ 500 J/kg per 300 s step,
+  # median step-to-step change 39 J/kg, p90 478. scale 100 puts the median
+  # penalty at -0.23 and p90 at -2.9, the same order as the other terms.
+  decay_stab_scale: 100.0
+  decay_stab_cap: 3.0         # [ASSUME] one storm step cannot swamp the episode
+
+# ---------------------------------------------------------------------------
+# Delegation to environmental perturbation — OFF for v8a
+# ---------------------------------------------------------------------------
+delegation:
+  enabled: false
+  # Values below are inert here; kept so the two files diff cleanly.
+  w_power: 6.0
+  w_accuracy: 2.0
+  kappa: 0.5
+  p_min: 0.05
+  p_sig: 0.25
+  torque_floor_Nm: 1.0e-11
+  tau_env_ref_Nm: 1.5e-8
+
+# ---------------------------------------------------------------------------
+# v9 trend adaptation — OFF for v8
+# ---------------------------------------------------------------------------
+trend:
+  enabled: false
+  gain_alt: 0.8
+  gain_soc: 1.0
+  soc_ref: 0.2

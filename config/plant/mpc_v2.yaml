@@ -1,0 +1,45 @@
+# Sampling MPC v2 — FROZEN 2026-08-23T16:31:34Z.
+# Do not edit. Winner of tune_mpc rounds A–F (id=C_H6_R8_cd0.5_sl0.5_gs2_ga1_pl4_k6, score=1.0127253446447508).
+# U575 6.81 ms published-scale (budget 15 ms); actual-algorithm 13.44 ms.
+# Sensors ON (GNSS + dual mag + SoC 0.5 % [ASSUME]).
+# Dipole 8-bit quantisation: NOT in the C++ plant — skipped [NOTE 2026-08-23].
+# Tags: [TUNE-A] horizon  [TUNE-B] n_random  [TUNE-C] cd×slew  [TUNE-D] gs  [TUNE-E] band  [TUNE-F] combo.
+name: mpc_v2
+horizon_steps: 6
+n_random: 8
+max_cmd_deg: 40.0
+advisor_step_s: 300.0
+use_sun_ephemeris: true
+soc_lo: 0.4
+soc_hi: 0.6
+soc_k: 6.0
+weights:
+  power_band: 1.0
+  power_low_pen: 4.0
+  gs: 2.0
+  gs_pen: 0.5
+  gs_align: 1.0
+  cd: 0.5
+  slew: 0.5
+sensors:
+  enabled: true
+  soc_sigma: 0.005
+dipole_quant_bits: null
+u575_ms: 6.805035714285713
+u575_ms_actual: 13.437285714285716
+tune:
+  id: C_H6_R8_cd0.5_sl0.5_gs2_ga1_pl4_k6
+  score: 1.0127253446447508
+  u575_ms: 6.805035714285713
+  u575_ms_actual: 13.437285714285716
+  date: '2026-08-23T16:31:34Z'
+  protocol: "10-orbit \xD7 3 seeds \xD7 quiet+storm, sensors on, v8a"
+  budget_ms: 15.0
+  winners:
+    A: A_H6_R8_cd0.5_sl0.2_gs2_ga1_pl4_k6
+    B: B_H6_R8_cd0.5_sl0.2_gs2_ga1_pl4_k6
+    C: C_H6_R8_cd0.5_sl0.5_gs2_ga1_pl4_k6
+    D: D_H6_R8_cd0.5_sl0.2_gs2_ga1_pl4_k6
+    E: E_H6_R8_cd0.5_sl0.2_gs2_ga1_pl4_k6
+    F: F_H6_R8_cd0.5_sl0.5_gs2_ga1_pl4_k6
+  dipole_quant: "skipped \u2014 plant has no 8-bit DAC"

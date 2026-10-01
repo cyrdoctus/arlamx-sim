@@ -1,0 +1,40 @@
+# SC_v2_6mq: SolarCat_v3, 7 cm static margin, flow-frame ZOH, eclipse min-drag mode (python/arlamx_v2/sc6mq.py).
+version: 2
+variant: v10r6
+vehicle: vehicle_v3c
+sensors: sensors_gaussian
+mtq_duty: 0.8            # rods on 80 % of each 2 s substep; magnetometer reads in the 20 % gap
+cmd_frame: flowS         # advisor command held in the flow frame (ZOH), re-evaluated every 2 s; roll: cells to the Sun
+gains: {wn: 0.05, zeta: 1.5}   # MRP PD from analysis/margin_gains_ss.json; K = 4 I wn^2, P = 2 zeta I wn
+ram_axis_body: [-0.5, -0.8660254, 0.0]   # min drag: -d_min on ram, membrane normal on orbit normal
+orbit:
+  altitude_km: [350, 450]
+  inc_deg: [20, 50]
+  ecc: [0.0, 0.005]
+  f107: [70, 250]
+  ap: [2, 120]
+  episode_orbits: 30
+sun_sigma: 0.05
+eclipse_mode: min_drag   # flight mode manager: min drag + all rods (damping) in eclipse, any advisor
+eclipse_frame: flowB     # eclipse roll: membrane normal on the field (max rod authority); sunlit: cmd_frame (Sun)
+weights:
+  base: 0.5
+  slew: 0.3
+  env: 0.4
+  rest: 0.8              # burn-in P4 (was 0.25)
+  att: 0.6               # tracking error, min(1, err / 30 deg)
+  sun: 0.0               # sunlit cell illumination |s.n| (burn-in knob)
+  ecl_drag: 0.6
+  ecl_mtq: 0.6
+  downlink: 3.0          # burn-in P4 (was 0.6)
+  band: 0.1
+  low: 0.8
+  brownout: 1.5
+slew_deg: 2.0
+low_thr: 0.25
+ppo:                     # 64 x 44 envs = 2816 samples per update (~17 updates per 50k burn-in)
+  learning_rate: 5.0e-4
+  n_steps: 64
+  batch_size: 704
+  n_epochs: 10
+  ent_coef: 0.003

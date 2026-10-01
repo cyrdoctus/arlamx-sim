@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install, build, test · ARLAMX v2.7</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false})"></script>
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX v2.7 docs</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7<small>spacecraft plant + deep-RL trainer</small></a>
+<h4>Start</h4>
+<a href="../guide/index.html">User guide</a>
+<a href="index.html">Overview</a>
+<a href="install.html" class="active">Install, build, test</a>
+<a href="architecture.html">Architecture & step loop</a>
+<h4>Physics</h4>
+<a href="aerodynamics.html">Free-molecular aerodynamics</a>
+<a href="srp.html">Solar & Earth radiation pressure</a>
+<a href="gravity.html">Gravity harmonics & third body</a>
+<a href="atmosphere.html">Atmosphere & space weather</a>
+<a href="attitude.html">Attitude, control, magnetics</a>
+<a href="geometry.html">Geometry & panel models</a>
+<h4>Deep RL</h4>
+<a href="training.html">Training & sessions</a>
+<a href="environment.html">Gym env, variants, rewards</a>
+<h4>Reference</h4>
+<a href="config.html">Configuration reference</a>
+<a href="api.html">Python / C++ API</a>
+<a href="validation.html">Validation & known limits</a>
+<h4>Plan</h4>
+<a href="plan-cll-materials.html">CLL + material model plan</a>
+</nav>
+<main>
+<h1>Install, build, test</h1>
+<p class="lede">The plant is a pybind11 extension built with CMake. Everything else is Python 3.12.</p>
+
+<h2>Environment</h2>
+<p>The intended environment is the <code>arlamx</code> mamba env from <code>environment.yml</code>. It pins conda-forge CPU PyTorch and Stable-Baselines3, so pip cannot overlay a CUDA wheel. <code>pymsis</code> is the only pip package. Do not <code>pip install -r requirements.txt</code> into the conda env; that file is only a pip-side hint.</p>
+<pre><code>mamba env create -f environment.yml      <span class="c"># first time</span>
+mamba activate arlamx
+mamba env update -n arlamx -f environment.yml</code></pre>
+<p>On this machine the <code>arlamx</code> env is not present. <code>~/miniforge3/envs/ThesisMS</code> works with the already-built library, and it is the interpreter that ran the tests below.</p>
+<table>
+<thead><tr><th>Dependency</th><th>Used for</th></tr></thead>
+<tbody>
+<tr><td>numpy, scipy</td><td>everything numeric, verify scripts</td></tr>
+<tr><td>gymnasium, stable-baselines3, torch</td><td>env API, PPO/SAC/TD3, INT8 quantization</td></tr>
+<tr><td>pymsis</td><td>NRLMSIS 2.1 / NRLMSISE-00 atmosphere</td></tr>
+<tr><td>trimesh (+ cascadio for STEP)</td><td>geometry import and plate simplification</td></tr>
+<tr><td>pyyaml</td><td>all configuration</td></tr>
+<tr><td>pybind11, cmake, a C++17 compiler</td><td>building <code>arlamx_cpp</code></td></tr>
+<tr><td>CSPICE (optional)</td><td>JPL ephemerides for the Sun and Moon (see below)</td></tr>
+<tr><td>Basilisk (optional)</td><td>referee tests in <code>tests/basilisk_ref/</code></td></tr>
+</tbody>
+</table>
+
+<h2>Build the C++ plant</h2>
+<pre><code>./build.sh                                   <span class="c"># uses $ARLAMX_PYTHON or the arlamx env interpreter</span>
+ARLAMX_PYTHON=~/miniforge3/envs/ThesisMS/bin/python ./build.sh</code></pre>
+<ul>
+<li><code>build.sh</code> refuses any interpreter that is not Python 3.12. It prefers that env's <code>cmake</code> / <code>c++</code>, and it drops a stale CMake cache that belongs to another source directory.</li>
+<li>Flags: <code>-O3 -Wall -Wextra</code>, C++17, Release. The output goes straight to <code>python/arlamx_v2/arlamx_cpp.cpython-312-x86_64-linux-gnu.so</code>.</li>
+<li>Sources: <code>aero/sentman.cpp, aero/cll.cpp, srp/panel_srp.cpp, orbit/{frames,gravity,third_body}.cpp, attitude/{mrp,integrate}.cpp, control/{mrp_feedback,quat_feedback,bdot,magnetorquer}.cpp, mag/field.cpp, onboard/propagator_f32.cpp, api.cpp, bindings.cpp</code>.</li>
+</ul>
+
+<h3 id="cspice">Building with CSPICE (needed for an ephemeris-file Moon)</h3>
+<p><code>cpp/CMakeLists.txt</code> enables <code>ARLAMX_HAVE_CSPICE</code> only when both <code>CSPICE_INCLUDE/SpiceUsr.h</code> and <code>CSPICE_LIB</code> exist. The default falls back to one hard-coded Conan path under <code>/home/nekolny/.conan2/…</code>. In the current <code>build/CMakeCache.txt</code> both variables are empty, so <b>the shipped .so has no SPICE</b> and uses the analytic Sun and Moon.</p>
+<pre><code><span class="c"># get the NAIF toolkit (cspice.a + include/) from naif.jpl.nasa.gov, then:</span>
+cmake -S cpp -B build -DCSPICE_INCLUDE=/opt/cspice/include -DCSPICE_LIB=/opt/cspice/lib/cspice.a
+cmake --build build -j
+<span class="c"># look for: "ARLAMX: CSPICE enabled (...)" in the configure output</span></code></pre>
+<p>Kernels are data, not source. For LEO work you want an SPK such as <code>de440s.bsp</code> (or <code>de430.bsp</code>). An LSK (<code>naif0012.tls</code>) is only needed if you convert UTC strings. See <a href="gravity.html#moon">Moon from an ephemeris file</a> for how to load them.</p>
+
+<h2>Data files</h2>
+<p><code>python/arlamx_v2/paths.py</code> resolves each file in this order: environment variable, then repo-local <code>data/</code>, then historical Basilisk / V1.7 paths.</p>
+<table>
+<thead><tr><th>File</th><th>Env var</th><th>Content</th></tr></thead>
+<tbody>
+<tr><td><code>data/GGM03S.txt</code></td><td><code>ARLAMX_GGM</code></td><td>GRACE GGM03S Stokes coefficients (header Re, μ, ω, nmax, mmax)</td></tr>
+<tr><td><code>data/WMM.COF</code></td><td><code>ARLAMX_WMM</code></td><td><b>WMM-2020</b> (epoch 2020.0). This is the default.</td></tr>
+<tr><td><code>data/WMM2025.COF</code></td><td>(set <code>ARLAMX_WMM</code> to it)</td><td>WMM-2025, the valid model for the 2026 epoch. It is not the default; see <a href="validation.html">known limits</a>.</td></tr>
+<tr><td><code>data/earthcup_hex_v3.geom</code></td><td><code>ARLAMX_HEX_GEOM</code></td><td>hex sail plate model (the default env geometry)</td></tr>
+<tr><td><code>data/SolarCat_v3_1pct_plates.geom</code></td><td>—</td><td>176-plate SolarCat_v3 model (SC_v1–v3_6mq)</td></tr>
+<tr><td><code>data/SolarCat_*.stl</code></td><td><code>ARLAMX_SOLARCAT_STL</code></td><td>CAD meshes</td></tr>
+<tr><td><code>data/{julian_date,position,velocity}.csv</code></td><td>—</td><td>reference trajectory samples</td></tr>
+</tbody>
+</table>
+
+<h2>Tests</h2>
+<pre><code>python main.py test          <span class="c"># pytest tests -q</span>
+python main.py verify        <span class="c"># tests/validation/verify_physics.py: scipy / finite-difference / textbook cross-checks</span></code></pre>
+<div class="good"><b>Result on 2026-09-30</b>
+<code>268 passed in 7.86 s</code> with <code>~/miniforge3/envs/ThesisMS/bin/python</code>, including the Basilisk referee tests (Basilisk is installed here). The README says 259; the count has grown since then.</div>
+<p>Test layout: one folder per module (<code>aero, srp, orbit, attitude, control, mag, geometry, estimators, sensors, power, propagator, reward, duo</code>), plus <code>basilisk_ref</code>, <code>integration</code>, <code>physics</code> (wiring + disturbances) and <code>validation</code> (hostile inputs + independent verify).</p>
+
+<footer>ARLAMX v2.7 documentation · generated 2026-09-30 from the source tree (cpp/, python/arlamx_v2/, config/). Equations render with KaTeX when online; offline they show as TeX.</footer>
+</main>
+</div>
+</body>
+</html>

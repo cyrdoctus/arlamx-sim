@@ -1,0 +1,23 @@
+# Intended install is the mamba env, not this file:
+#   mamba env update -n arlamx -f environment.yml
+#   ./build.sh
+#
+# Do not `pip install -r requirements.txt` into that env. An unpinned `torch`
+# wheel overlays conda-forge `pytorch` (CPU vs CUDA) and breaks import/SB3.
+#
+# Pip-only (no conda): Python 3.12, a C++ compiler, CMake, then CPU torch, then this file:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements.txt
+numpy
+scipy
+pybind11
+cmake
+pyyaml
+matplotlib
+gymnasium
+stable-baselines3
+pymsis
+trimesh
+cascadio
+tensorboard
+pytest

@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# C++ plant build (./build.sh)
+build/
+cmake-build-*/
+CMakeUserPresets.json
+compile_commands.json
+
+# Compiled extension. Rebuild after clone with ./build.sh
+python/arlamx_v2/*.so
+python/arlamx_v2/*.pyd
+
+# Training runs, campaign artifacts, figures, slide node_modules
+outputs/
+
+node_modules/
+
+# Editor and OS
+.DS_Store
+Thumbs.db
+*~
+*.swp
+.idea/
+.vscode/
+*.log
+.env
+.env.*

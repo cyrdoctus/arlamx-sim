@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Python libraries · ARLAMX</title>
+<link rel="stylesheet" href="../html/assets/style.css">
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX guide</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7.5<small>user guide</small></a>
+<h4>Guide</h4>
+<a href="index.html">Overview</a>
+<a href="commands.html">Commands</a>
+<a href="fmf.html">Free-molecular flow</a>
+<a href="control.html">Control loop and deep RL</a>
+<a href="simplify.html">STL simplification</a>
+<a href="libraries.html" class="active">Python libraries</a>
+<h4>Also</h4>
+<a href="../html/install.html">Install reference</a>
+</nav>
+<main>
+<h1>Python libraries</h1>
+<p class="lede">The science code is split in two. Numerical integration, aerodynamics, radiation pressure, gravity, magnetics, and the attitude laws are C++17 in <code>cpp/</code>, exposed as <code>arlamx_cpp</code> through pybind11. Geometry, the atmosphere query, the Gymnasium environment, and the trainers are Python. Install the set below from <code>environment.yml</code>.</p>
+
+<pre><code>mamba env create -n arlamx -f environment.yml
+mamba activate arlamx
+./build.sh</code></pre>
+<div class="warn"><b>Keep the conda PyTorch</b>
+<code>environment.yml</code> selects the conda-forge CPU build of PyTorch and conda-forge Stable-Baselines3. <code>pip install torch</code> on top of that environment replaces it, often with a CUDA wheel, and the trainer stops importing. <code>requirements.txt</code> is only a hint for a machine with no conda. On that path, install a CPU torch from the PyTorch index first, then <code>pip install -r requirements.txt</code>.</div>
+
+<h2>Installed for the plant and the trainer</h2>
+<table>
+<thead><tr><th>Package</th><th>Where it comes from</th><th>What ARLAMX uses it for</th></tr></thead>
+<tbody>
+<tr><td>Python 3.12</td><td>conda-forge</td><td><code>./build.sh</code> refuses any other version. The extension is tagged for 3.12.</td></tr>
+<tr><td>NumPy</td><td>conda-forge</td><td>Plate arrays, state vectors, and the arrays passed into the C++ simulator.</td></tr>
+<tr><td>SciPy</td><td>conda-forge</td><td>Independent checks in <code>python main.py verify</code> and the tests. The plant itself does not integrate with SciPy.</td></tr>
+<tr><td>PyYAML</td><td>conda-forge</td><td>Every file under <code>config/</code>.</td></tr>
+<tr><td>Matplotlib</td><td>conda-forge</td><td>Decay plots, simplification figures, campaign figures.</td></tr>
+<tr><td>Gymnasium</td><td>conda-forge</td><td><code>ArlamxV2Env</code>. The advisor API the trainers speak.</td></tr>
+<tr><td>PyTorch</td><td>conda-forge, CPU</td><td>The policy and value networks. Training is FP32.</td></tr>
+<tr><td>Stable-Baselines3</td><td>conda-forge</td><td>PPO, SAC, and TD3, plus VecNormalize. Cloudpickle rides along so those zips reload.</td></tr>
+<tr><td>TensorBoard</td><td>conda-forge</td><td>Logs under <code>outputs/models/&lt;id&gt;/logs/</code>.</td></tr>
+<tr><td>pymsis</td><td>pip, inside the env file</td><td>NRLMSIS 2.1 and NRLMSISE-00. It is not on conda-forge. <code>atmosphere.py</code> calls it.</td></tr>
+<tr><td>trimesh</td><td>conda-forge</td><td>Loads STL, OBJ, and STEP into vertices and faces for the simplifier.</td></tr>
+<tr><td>cascadio</td><td>pip, inside the env file</td><td>OpenCASCADE tessellation so trimesh can read STEP. STL and OBJ do not need it.</td></tr>
+<tr><td>pybind11</td><td>conda-forge</td><td>Generates the Python module from <code>cpp/src/bindings.cpp</code>. <code>./build.sh</code> asks this interpreter for the CMake directory.</td></tr>
+<tr><td>CMake, a C++ compiler, make</td><td>conda-forge</td><td>Build the plant. C++17, position-independent code, no Eigen.</td></tr>
+<tr><td>pytest</td><td>conda-forge</td><td><code>python main.py test</code>.</td></tr>
+</tbody>
+</table>
+
+<h2>Optional</h2>
+<table>
+<thead><tr><th>Package</th><th>When</th></tr></thead>
+<tbody>
+<tr><td>reportlab</td><td><code>python main.py plot build_mpc_report</code> writes a PDF. Nothing else imports it.</td></tr>
+<tr><td>Basilisk</td><td>Optional gravity referee. <code>tests/basilisk_ref/</code> skips cleanly when it is absent. The plant does not link it.</td></tr>
+<tr><td>CSPICE</td><td>The C++ API can load a SPICE kernel for the Sun and Moon. The shipped build does not link CSPICE. The high physics preset uses the analytic Meeus ephemeris.</td></tr>
+</tbody>
+</table>
+
+<h2>Standard library, used directly</h2>
+<p>The trainers and the command line also use the Python standard library throughout: <code>argparse</code>, <code>pathlib</code>, <code>dataclasses</code>, <code>concurrent.futures</code> for the Monte Carlo tools, and <code>subprocess</code> when <code>main.py</code> launches pytest. Those need no extra install.</p>
+
+<footer>ARLAMX v2.7.5 user guide · versions are whatever <code>environment.yml</code> resolves on conda-forge, plus the pip pins recorded in that file.</footer>
+</main>
+</div>
+</body>
+</html>

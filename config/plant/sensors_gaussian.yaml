@@ -1,0 +1,44 @@
+# SC_v1_6mq: white Gaussian noise only (no bias, drift, temperature, misalignment, quantization, iron).
+enabled: true
+seed: 0
+temp_ref_C: 25.0
+gyro:
+  arw_dps_rthz: 0.0028
+  turn_on_bias_dps: 0.0
+  bias_tempco_dps_per_C: 0.0
+  bias_tempco_poly: []
+  rrw_dps_per_s_rthz: 0.0
+  rrw_on_datasheet: false
+  scale_factor_err: 0.0
+  misalign_deg: 0.0
+  n_bits: 0
+  fs_dps: 2000.0
+accel:
+  noise_density_ug_rthz: 70.0
+  turn_on_bias_mg: 0.0
+  bias_tempco_mg_per_C: 0.0
+  n_bits: 0
+  fs_g: 16.0
+mag:
+  noise_mG_rms: 0.4
+  noise_bw_hz: 100.0
+  lsb_mG: 0.0
+  fs_G: 8.0
+  nonlinearity_pct_fs: 0.0
+  hard_iron_mG: 0.0
+  soft_iron:
+    - [1.0, 0.0, 0.0]
+    - [0.0, 1.0, 0.0]
+    - [0.0, 0.0, 1.0]
+  sens_tempco_pct_per_C: 0.0
+  dipole_coupling_mG_per_Am2:
+    - [0.0, 0.0, 0.0]
+    - [0.0, 0.0, 0.0]
+    - [0.0, 0.0, 0.0]
+gnss:
+  fix_rate_hz: 1.0
+  ttff_s: 0.0
+  pos_gm_sigma_m: 0.0
+  pos_gm_tau_s: 300.0
+  pos_white_m: 10.0
+  vel_sigma_ms: 0.1

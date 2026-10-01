@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gym env, variants, rewards · ARLAMX v2.7</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false})"></script>
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX v2.7 docs</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7<small>spacecraft plant + deep-RL trainer</small></a>
+<h4>Start</h4>
+<a href="../guide/index.html">User guide</a>
+<a href="index.html">Overview</a>
+<a href="install.html">Install, build, test</a>
+<a href="architecture.html">Architecture & step loop</a>
+<h4>Physics</h4>
+<a href="aerodynamics.html">Free-molecular aerodynamics</a>
+<a href="srp.html">Solar & Earth radiation pressure</a>
+<a href="gravity.html">Gravity harmonics & third body</a>
+<a href="atmosphere.html">Atmosphere & space weather</a>
+<a href="attitude.html">Attitude, control, magnetics</a>
+<a href="geometry.html">Geometry & panel models</a>
+<h4>Deep RL</h4>
+<a href="training.html">Training & sessions</a>
+<a href="environment.html" class="active">Gym env, variants, rewards</a>
+<h4>Reference</h4>
+<a href="config.html">Configuration reference</a>
+<a href="api.html">Python / C++ API</a>
+<a href="validation.html">Validation & known limits</a>
+<h4>Plan</h4>
+<a href="plan-cll-materials.html">CLL + material model plan</a>
+</nav>
+<main>
+<h1>Gym env, variants, rewards</h1>
+<p class="lede"><code>ArlamxV2Env</code> (<code>python/arlamx_v2/env.py</code>) is a Gymnasium env around the C++ plant. One step is one 300 s advisor decision.</p>
+
+<h2>Constructor</h2>
+<pre><code>ArlamxV2Env(geom_path=None, ggm_path=None, seed=None, variant="v3", gate_floor=None, kp=None, kd=None,
+            obs_extra="observer", reward_w=None, controller=None, physics="standard", gsi=None,
+            orbit=None, frozen=None, vehicle="vehicle", sensors_cfg="sensors_solarcat",
+            mtq_duty=1.0, cmd_frame="inertial", advisor_s=None, inner_dt=None)</code></pre>
+<table>
+<thead><tr><th>Argument</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>variant</code></td><td>v3, v4a, v4b, v5a, v5b, v6, v7, v8a, v8b, v9a–d, v10, v11, v10r6</td></tr>
+<tr><td><code>physics</code></td><td>fast | standard | high | path to a physics YAML | dict</td></tr>
+<tr><td><code>gsi</code>, <code>controller</code></td><td>override <code>aero.gsi</code> and <code>attitude.law</code></td></tr>
+<tr><td><code>orbit</code></td><td>envelope dict: altitude_km, inc_deg, ecc, f107, ap, raan_deg, argp_deg, nu_deg, omega_dps, mass_kg, soc, episode_orbits</td></tr>
+<tr><td><code>frozen</code></td><td>pinned plant configs (from a snapshot)</td></tr>
+<tr><td><code>obs_extra</code></td><td>none | ctrl | observer | observer_fore. Zero-masks the v7 block for ablations without changing the shape.</td></tr>
+<tr><td><code>cmd_frame</code>, <code>mtq_duty</code>, <code>advisor_s</code>, <code>inner_dt</code></td><td>plant command frame, coil duty, decision period, substep</td></tr>
+</tbody>
+</table>
+
+<h2>Reset</h2>
+<ul>
+<li>Orbit: altitude U(300, 500) km, inclination U(20, 40)° (v10+), eccentricity U(0, 0.01), RAAN/argp/ν uniform. Converted with <code>coe_to_rv</code>.</li>
+<li>Attitude: random MRP |σ| ≤ 0.3. Tumble ω U(−5, 5)°/s per axis. Forced brownout gives 3–5°/s.</li>
+<li>Space weather per the variant envelope (see <a href="atmosphere.html">Atmosphere</a>). Mass: the vehicle card (v8+) or U(0.5, 0.75) kg. SoC 0.5.</li>
+<li>Episode length: 40 / 120 (v10) / 160 (v11) orbits of a 400 km period. Terminated below 250 km geodetic.</li>
+<li>Deterministic evaluation: <code>reset(seed=…, options={altitude_km, inc_deg, ecc, f107, ap, omega_dps, soc, mass_kg, damage_kind, damage_step_frac, force_brownout, …})</code>.</li>
+</ul>
+
+<h2>Observation</h2>
+<table>
+<thead><tr><th>Block</th><th>Size</th><th>Content</th></tr></thead>
+<tbody>
+<tr><td>base</td><td>26</td><td>r/7000 km (3), v/8 km/s (3), ω (3), B̂_B (3), |B|/50 µT, v̂_B (3), sin ν, cos ν, mass, log₁₀ρ, SoC, P_gen_norm, ground-station direction + visible (4)</td></tr>
+<tr><td>v7 IPC (+9)</td><td>35</td><td>τ_ctrl/cap (3), disturbance estimate/cap (3), mean gate, Sun foresight (2)</td></tr>
+<tr><td>v10r6 (+6, appended last)</td><td>89</td><td>current on/off state of the 6 rods (0/1)</td></tr>
+<tr><td>v9 temporal</td><td>up to 83</td><td>future (FP32 forecast): Δalt, Δsma, SoC_proj, offset per offset; history: alt, SoC, log₁₀ρ, |ω| per offset. v9d / v10+: 6 + 6 offsets.</td></tr>
+</tbody>
+</table>
+<p class="small">The policy sees plant truth for r, v, ω, B. Sensor noise only affects the torque KF. The same holds for the MPC baselines, so advisor-vs-advisor comparisons are fair, but the input side is not flight-representative.</p>
+
+<h2>Action</h2>
+<table>
+<thead><tr><th>Variant</th><th>Dim</th><th>Content</th></tr></thead>
+<tbody>
+<tr><td>v3–v5</td><td>4</td><td>target quaternion (normalised, slerp-clipped)</td></tr>
+<tr><td>v6</td><td>5</td><td>+ torque scale 0.15–1 (150 s step)</td></tr>
+<tr><td>v7</td><td>7</td><td>+ per-axis authority gates in [gate_floor, 1]</td></tr>
+<tr><td>v8b, v9, v10, v11</td><td>7</td><td>+ delegation split s ∈ [0, 1]³, gate = 1 − s(1 − floor). In v8a the split is ignored (control arm).</td></tr>
+<tr><td>v10r6</td><td>10</td><td>quaternion + 6 rod on/off gates (&gt; 0 = on)</td></tr>
+</tbody>
+</table>
+
+<h2>Reward families</h2>
+<table>
+<thead><tr><th>Family</th><th>File</th><th>Main terms</th></tr></thead>
+<tbody>
+<tr><td>SC_v3–v7</td><td><code>reward.py</code></td><td>exponential-longevity-weighted ΔE vs baseline, SoC-modulated power, ground-station alignment, smoothness, ω, momentum, altitude cliff; v4 power band; v5 lift/SRP work, torque thrift; v7 composite</td></tr>
+<tr><td>SC_v8+</td><td><code>reward_v8.py</code>, <code>config/plant/reward_v*.yaml</code></td><td><code>dE_vs_baseline</code> (weight 2.6, the decisive knob), power band 0.4–0.6, tiered GS pointing, feasibility, stability margin (320/250 km), dE stability, delegation power/accuracy/boost, v9 trend adaptation, v10 power drop, v11 adapt_consistency / deleg_hold</td></tr>
+<tr><td>v12–v14</td><td><code>train_v12.py::V12Wrapper</code></td><td>slew penalty, env-torque alignment, clip penalty, MPC-scored comparator, wrong-way clip, climate mix, low-SoC and generation terms</td></tr>
+</tbody>
+</table>
+<p>Full equations are in <code>docs/modules/14_reward_v8.md</code> and <code>docs/handoff/06_reward_and_delegation.md</code>. Note the documented bug: before 2026-09-13, <code>deleg_power</code> was identically zero in every run.</p>
+
+<h2>Power model</h2>
+<p>Housekeeping 7 mW, +205 mW sunlit avionics (and GNSS 205 mW), +400 mW during a pointed lit pass. Generation 0.78 W × 0.85 × |ẑ·ŝ| (two-sided cells). 0.53 Wh supercap. Actuation is I²R-quadratic in the applied dipole (v8+). At zero SoC the env enters brownout: detumble, then a Sun-search recovery loop.</p>
+
+<h2>Baselines</h2>
+<ul>
+<li><code>advisors/attitudes.py</code>: min drag, fixed AoA, axis pointing.</li>
+<li><code>advisors/heuristic.py</code>: power-aware heuristic bank.</li>
+<li><code>advisors/mpc.py</code>, <code>mpc_v3.py</code>: sampling MPC over the C++ plant (flow-frame, actuator-limited in v3).</li>
+<li><code>duo.py</code>: arbiter between two advisors by FP32 forward propagation.</li>
+</ul>
+
+<footer>ARLAMX v2.7 documentation · generated 2026-09-30 from the source tree (cpp/, python/arlamx_v2/, config/). Equations render with KaTeX when online; offline they show as TeX.</footer>
+</main>
+</div>
+</body>
+</html>

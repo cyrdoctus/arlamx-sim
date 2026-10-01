@@ -1,0 +1,25 @@
+name: arlamx
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - cxx-compiler
+  - make
+  - cmake
+  - pybind11
+  - numpy
+  - scipy
+  - pyyaml
+  - matplotlib
+  - gymnasium
+  - cloudpickle
+  # conda-forge has no `cpuonly`; `*cpu*` selects the CPU build. CUDA is not assumed.
+  - pytorch=*=*cpu*
+  - stable-baselines3
+  - trimesh
+  - tensorboard
+  - pytest
+  - pip
+  - pip:
+    - pymsis
+    - cascadio          # STEP import for geometry.load_mesh (OpenCASCADE)

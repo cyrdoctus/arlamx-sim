@@ -1,0 +1,41 @@
+name: fast
+
+gravity:
+  model: ggm03s
+  degree: 2
+  lunisolar: false
+  gradient_torque: true  # 3 mu/r^3 u x Iu (Markley & Crassidis 2014, ch. 3)
+
+atmosphere:
+  model: msis21
+  f107: 150.0
+  ap: 4.0
+  corotating: true
+  interp: false           # 2nd MSIS sample at step end, linear in time (criticv1 F11)
+
+aero:
+  gsi: sentman
+  alpha_E: 0.93
+  alpha_n: 1.0
+  alpha_t: 1.0
+  T_w: 300.0
+  one_sided_ref: true
+
+srp:
+  enabled: true
+  optical: true          # plate law along n and s (Montenbruck & Gill 2000, Sec. 3.4)
+  optics: al_mylar       # partition from python/arlamx_v2/sail_optics.py
+  Cr: 1.8                # cannonball law only (optical: false)
+  earth: true            # Earth IR + albedo (Knocke et al. 1988 a0 = 0.34, e0 = 0.68)
+  # Thermal-IR partition of the cell faces: absorptance = emittance 0.85, no
+  # specular part in the IR [ASSUME; cover glass / polyimide 0.7-0.9].
+  ir: {ca: 0.85, cs: 0.0, cd: 0.15}
+
+magnetics:
+  model: dipole
+
+attitude:
+  law: mrp
+
+integrator:
+  rk4_step_s: 2.0

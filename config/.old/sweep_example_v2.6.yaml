@@ -1,0 +1,17 @@
+# Example grid: two algos × two controllers × one physics preset.
+# Resume: skip names already in outputs/training/SWEEP_LEDGER.csv or with metrics.json.
+name: v8a_controller_grid
+backend: train          # train | train_v12
+variant: v8a
+algo: [ppo, sac]
+controller: [mrp, quaternion]
+physics: standard
+seeds: [42]
+timesteps: 100000
+n_envs: 8
+arch: 4x16
+out: outputs/training
+
+# Optional explicit arms instead of the product above:
+# arms:
+#   - {name: slew_hi, env_kw: {controller: mrp, physics: high}, ppo_kw: {}}

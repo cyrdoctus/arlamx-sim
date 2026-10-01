@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configuration reference · ARLAMX v2.7</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false})"></script>
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX v2.7 docs</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7<small>spacecraft plant + deep-RL trainer</small></a>
+<h4>Start</h4>
+<a href="../guide/index.html">User guide</a>
+<a href="index.html">Overview</a>
+<a href="install.html">Install, build, test</a>
+<a href="architecture.html">Architecture & step loop</a>
+<h4>Physics</h4>
+<a href="aerodynamics.html">Free-molecular aerodynamics</a>
+<a href="srp.html">Solar & Earth radiation pressure</a>
+<a href="gravity.html">Gravity harmonics & third body</a>
+<a href="atmosphere.html">Atmosphere & space weather</a>
+<a href="attitude.html">Attitude, control, magnetics</a>
+<a href="geometry.html">Geometry & panel models</a>
+<h4>Deep RL</h4>
+<a href="training.html">Training & sessions</a>
+<a href="environment.html">Gym env, variants, rewards</a>
+<h4>Reference</h4>
+<a href="config.html" class="active">Configuration reference</a>
+<a href="api.html">Python / C++ API</a>
+<a href="validation.html">Validation & known limits</a>
+<h4>Plan</h4>
+<a href="plan-cll-materials.html">CLL + material model plan</a>
+</nav>
+<main>
+<h1>Configuration reference</h1>
+<p class="lede">Every YAML file, every key, and the C++ <code>SimParams</code> field each one lands in.</p>
+
+<h2>Files</h2>
+<table>
+<thead><tr><th>File</th><th>Holds</th></tr></thead>
+<tbody>
+<tr><td><code>config/network.yaml</code>, <code>network_quick.yaml</code></td><td>algo, layers, width, timesteps, n_envs, seed, torch_threads, ppo/sac/td3 blocks, vecnormalize</td></tr>
+<tr><td><code>config/orbit.yaml</code></td><td><code>training:</code> the episode envelope; <code>simulation:</code> the decay-run orbit</td></tr>
+<tr><td><code>config/train.yaml</code></td><td>name, backend, variant, physics, gsi, controller, reward_w, <code>v12:</code> wrapper knobs</td></tr>
+<tr><td><code>config/sweep.yaml</code></td><td>name, base, grid | arms (dotted keys)</td></tr>
+<tr><td><code>config/sc_v*_6mq*.yaml</code></td><td>SolarCat six-rod campaign settings (<code>sc6mq.py</code>, <code>sc3.py</code>)</td></tr>
+<tr><td><code>config/plant/physics{,_fast,_high}.yaml</code></td><td>physics presets (below)</td></tr>
+<tr><td><code>config/plant/reward_v8a|v8b|v9|v10|v11|v12.yaml</code></td><td>reward weights with provenance tags</td></tr>
+<tr><td><code>config/plant/gains_mrp.yaml</code></td><td>kp, kd, gate_floor</td></tr>
+<tr><td><code>config/plant/power_mtq.yaml</code></td><td>coil card (torque_max_Nm, dipole_max_Am2, power_peak_W), vehicle mass, cp offset</td></tr>
+<tr><td><code>config/plant/estimator_kf.yaml</code></td><td>torque KF noise, gate, inertia</td></tr>
+<tr><td><code>config/plant/sensors_solarcat.yaml</code>, <code>sensors_gaussian.yaml</code></td><td>sensor datasheets</td></tr>
+<tr><td><code>config/plant/vehicle*.yaml</code></td><td>mass budget, geometry file, rods, cp offset, trim</td></tr>
+<tr><td><code>config/plant/mpc_v1..v3.yaml</code>, <code>duo.yaml</code></td><td>baselines</td></tr>
+</tbody>
+</table>
+
+<h2>Physics YAML</h2>
+<table>
+<thead><tr><th>Key</th><th>Type / values</th><th>standard</th><th>fast</th><th>high</th><th>→ SimParams</th></tr></thead>
+<tbody>
+<tr><td><code>gravity.model</code></td><td>ggm03s | twobody</td><td>ggm03s</td><td>ggm03s</td><td>ggm03s</td><td>sh_degree = 0 if twobody</td></tr>
+<tr><td><code>gravity.degree</code></td><td>0–24</td><td>4</td><td>2</td><td>8</td><td><code>sh_degree</code></td></tr>
+<tr><td><code>gravity.lunisolar</code></td><td>bool</td><td>false</td><td>false</td><td>true</td><td><code>lunisolar</code></td></tr>
+<tr><td><code>gravity.gradient_torque</code></td><td>bool</td><td>true</td><td>true</td><td>true</td><td><code>gravity_gradient</code></td></tr>
+<tr><td><code>atmosphere.model</code></td><td>msis21 | nrlmsise00 | constant</td><td>msis21</td><td>msis21</td><td>msis21</td><td>(Python)</td></tr>
+<tr><td><code>atmosphere.f107</code>, <code>ap</code></td><td>float</td><td>150, 4</td><td>150, 4</td><td>150, 4</td><td>(Python, seed only)</td></tr>
+<tr><td><code>atmosphere.corotating</code></td><td>bool</td><td>true</td><td>true</td><td>true</td><td><code>corotating</code></td></tr>
+<tr><td><code>atmosphere.interp</code></td><td>bool</td><td>true</td><td>false</td><td>true</td><td>(Python → set_atmosphere_end)</td></tr>
+<tr><td><code>atmosphere.constant</code></td><td>{rho, T, m_bar}</td><td>—</td><td>—</td><td>—</td><td>(Python)</td></tr>
+<tr><td><code>aero.gsi</code></td><td>sentman | cll</td><td>sentman</td><td>sentman</td><td>cll</td><td><code>gsi</code></td></tr>
+<tr><td><code>aero.alpha_E</code></td><td>0–1</td><td>0.93</td><td>0.93</td><td>0.93</td><td><code>alpha_E</code></td></tr>
+<tr><td><code>aero.alpha_n</code></td><td>0–1</td><td>1.0</td><td>1.0</td><td>0.93</td><td><code>alpha_n</code></td></tr>
+<tr><td><code>aero.alpha_t</code></td><td>0–1 (σ_T)</td><td>1.0</td><td>1.0</td><td>1.0</td><td><code>alpha_t</code></td></tr>
+<tr><td><code>aero.T_w</code></td><td>K</td><td>300</td><td>300</td><td>300</td><td><code>T_w</code></td></tr>
+<tr><td><code>aero.one_sided_ref</code></td><td>bool</td><td>true</td><td>true</td><td>true</td><td><code>one_sided_ref</code></td></tr>
+<tr><td><code>srp.enabled</code></td><td>bool (required)</td><td>true</td><td>true</td><td>true</td><td><code>use_panel_srp</code></td></tr>
+<tr><td><code>srp.optical</code></td><td>bool</td><td>true</td><td>true</td><td>true</td><td><code>srp_optical</code></td></tr>
+<tr><td><code>srp.optics</code></td><td>preset name</td><td>al_mylar</td><td>al_mylar</td><td>al_mylar</td><td><code>srp_ca/cs/cd</code></td></tr>
+<tr><td><code>srp.Cr</code></td><td>float</td><td>1.8</td><td>1.8</td><td>1.8</td><td><code>Cr</code></td></tr>
+<tr><td><code>srp.earth</code></td><td>bool</td><td>true</td><td>true</td><td>true</td><td><code>earth_rad</code></td></tr>
+<tr><td><code>srp.ir</code></td><td>{ca, cs, cd}</td><td>.85/0/.15</td><td>.85/0/.15</td><td>.85/0/.15</td><td><code>ir_ca/cs/cd</code></td></tr>
+<tr><td><code>magnetics.model</code></td><td>wmm | dipole</td><td>wmm</td><td>dipole</td><td>wmm</td><td><code>wmm_path</code> ("" = dipole)</td></tr>
+<tr><td><code>attitude.law</code></td><td>mrp | quaternion</td><td>mrp</td><td>mrp</td><td>mrp</td><td><code>attitude_law</code></td></tr>
+<tr><td><code>attitude.ideal_torque</code></td><td>bool</td><td>false</td><td>(false)</td><td>(false)</td><td><code>ideal_torque</code></td></tr>
+<tr><td><code>integrator.rk4_step_s</code></td><td>(0, 120]</td><td>2.0</td><td>2.0</td><td>2.0</td><td><code>rk4_step_s</code></td></tr>
+</tbody>
+</table>
+<p class="small"><code>config/plant/.physics_ideal.yaml</code> is the standard preset with <code>ideal_torque: true</code>, the plant the v8–v14 campaigns were tuned on.</p>
+
+<h2>SimParams (all fields)</h2>
+<table>
+<thead><tr><th>Field</th><th>Default</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>mass</code></td><td>0.625 kg</td><td>&gt; 0</td></tr>
+<tr><td><code>inertia</code></td><td>diag(0.0125, 0.0125, 0.025)</td><td><code>set_inertia</code> / <code>set_inertia_diag</code></td></tr>
+<tr><td><code>dt_s</code></td><td>2.0</td><td>(0, 300] substep</td></tr>
+<tr><td><code>advisor_step_s</code></td><td>300.0</td><td>(0, 3600]</td></tr>
+<tr><td><code>rk4_step_s</code></td><td>2.0</td><td>(0, 120]</td></tr>
+<tr><td><code>sh_degree</code></td><td>4</td><td>≤ 24</td></tr>
+<tr><td><code>lunisolar</code></td><td>false</td><td>Sun + Moon third body</td></tr>
+<tr><td><code>use_panel_srp</code>, <code>srp_optical</code>, <code>srp_ca/cs/cd</code>, <code>Cr</code>, <code>srp_scale</code></td><td>true, false, 1/0/0, 1.8, 1.0</td><td>solar pressure (the env sets <code>srp_optical</code> from YAML)</td></tr>
+<tr><td><code>earth_rad</code>, <code>ir_ca/cs/cd</code></td><td>false, .85/0/.15</td><td>Earth IR + albedo</td></tr>
+<tr><td><code>corotating</code>, <code>wind_N</code></td><td>true, 0</td><td>relative velocity</td></tr>
+<tr><td><code>gsi</code>, <code>alpha_E</code>, <code>alpha_n</code>, <code>alpha_t</code>, <code>T_w</code>, <code>one_sided_ref</code></td><td>sentman, 0.93, 1, 1, 300, true</td><td>aero</td></tr>
+<tr><td><code>gravity_gradient</code></td><td>true</td><td>GG torque</td></tr>
+<tr><td><code>attitude_law</code>, <code>ideal_torque</code>, <code>max_slew_rad</code>, <code>mode</code></td><td>mrp, false, 45°, point</td><td>control</td></tr>
+<tr><td><code>cmd_frame</code>, <code>mtq_duty</code></td><td>inertial, 1.0</td><td>command frame, coil duty</td></tr>
+<tr><td><code>epoch_jd</code></td><td>2461060.5</td><td>2026-01-15 00:00 UTC</td></tr>
+<tr><td><code>ggm_path</code>, <code>wmm_path</code></td><td>""</td><td>loaded in the constructor. GGM failure throws.</td></tr>
+</tbody>
+</table>
+
+<h2>orbit.yaml</h2>
+<pre><code>training:                 <span class="c"># [lo, hi] = drawn each episode, number = fixed, null = variant default</span>
+  altitude_km: [300, 500]
+  inc_deg: [20, 40]
+  ecc: [0.0, 0.01]
+  f107: [5, 250]
+  ap: [2, 200]
+  raan_deg: null          <span class="c"># U(0, 360)</span>
+  argp_deg: null
+  nu_deg: null
+  omega_dps: [-5, 5]      <span class="c"># initial tumble per axis</span>
+  mass_kg: null
+  soc: 0.5
+  episode_orbits: null    <span class="c"># 40 / 120 (v10) / 160 (v11)</span>
+simulation:               <span class="c"># python main.py decay</span>
+  alt0_km: 500
+  alt_stop_km: 250
+  inc_deg: 23
+  ecc: 0.001
+  f107: 150
+  ap: 4
+  mass_kg: 0.625
+  dt_s: 5
+  max_days: 800
+  geom: hex               <span class="c"># hex | stl1pct</span></code></pre>
+
+<h2>train.yaml</h2>
+<pre><code>name: null            <span class="c"># auto id MM-DD-HH-MM_ALGO_LxW</span>
+backend: train        <span class="c"># train | v12</span>
+variant: v10
+physics: standard     <span class="c"># fast | standard | high | path</span>
+gsi: null             <span class="c"># null = physics file</span>
+controller: null
+reward_w: {}
+v12: {w_slew: 0.5, use_cmp: false, w_env: 0.0, clip_wrong_way: false, ..., resume: null, ppo_kw: {}}</code></pre>
+
+<h2>Environment variables</h2>
+<table>
+<thead><tr><th>Variable</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>ARLAMX_GGM</code>, <code>ARLAMX_WMM</code>, <code>ARLAMX_HEX_GEOM</code>, <code>ARLAMX_SOLARCAT_STL</code>, <code>ARLAMX_V17</code></td><td>data-file overrides</td></tr>
+<tr><td><code>ARLAMX_PYTHON</code></td><td>interpreter for <code>build.sh</code></td></tr>
+<tr><td><code>ARLAMX_TORCH_THREADS</code></td><td>torch.set_num_threads in the trainer</td></tr>
+</tbody>
+</table>
+
+<footer>ARLAMX v2.7 documentation · generated 2026-09-30 from the source tree (cpp/, python/arlamx_v2/, config/). Equations render with KaTeX when online; offline they show as TeX.</footer>
+</main>
+</div>
+</body>
+</html>

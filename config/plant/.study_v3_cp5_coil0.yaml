@@ -1,0 +1,18 @@
+# SolarCat_v3 with the cp offset on the min-drag axis (SC_v2_6mq). Otherwise identical to vehicle_v3.yaml.
+name: v3_cp5_coil0
+geom: SolarCat_v3_1pct_plates.geom
+mass_kg:
+  pcb_battery: 0.080     # [USER] at the centre
+  rods: 0.170            # [USER] six rods, one per beam
+  structure: 0.500       # [USER] membrane + beams
+beam_share: 0.104        # [ASSUME] beam share of the structure (hex_v3 area share)
+membrane_radius_m: 0.512 # STL: 1.024 m corner to corner
+beam_length_m: 0.512     # hexagon side = circumradius
+beam_apothem_m: 0.440    # STL flat-to-flat 0.890 m, beam midline just inside the edge
+beam_angle0_deg: 30.0    # STL vertices on body X, side midpoints at 30 + 60 k deg
+cp_offset_m: [0.0250, 0.043301, 0.0]   # [DESIGN] 1 cm along the min-drag axis (0.5, 0.866, 0): cp downstream when -axis faces ram
+rods:
+  count: 6
+  dipole_max_Am2: 0.80   # sizing study: 2.25 mm x 0.48 m permalloy core, 28.3 g (outputs/SC_v1_6mq/analysis)
+  power_peak_W: 0.050    # [ASSUME] 1.7 mW I^2R + driver overhead
+b_ref_T: 2.5963e-5

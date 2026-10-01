@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CLL + material model plan · ARLAMX v2.7</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false})"></script>
+</head>
+<body>
+<button class="menu-btn" onclick="document.querySelector('nav.side').classList.toggle('open')">☰ ARLAMX v2.7 docs</button>
+<div class="layout">
+<nav class="side">
+<a class="brand" href="index.html" style="padding:0;background:none">ARLAMX v2.7<small>spacecraft plant + deep-RL trainer</small></a>
+<h4>Start</h4>
+<a href="../guide/index.html">User guide</a>
+<a href="index.html">Overview</a>
+<a href="install.html">Install, build, test</a>
+<a href="architecture.html">Architecture & step loop</a>
+<h4>Physics</h4>
+<a href="aerodynamics.html">Free-molecular aerodynamics</a>
+<a href="srp.html">Solar & Earth radiation pressure</a>
+<a href="gravity.html">Gravity harmonics & third body</a>
+<a href="atmosphere.html">Atmosphere & space weather</a>
+<a href="attitude.html">Attitude, control, magnetics</a>
+<a href="geometry.html">Geometry & panel models</a>
+<h4>Deep RL</h4>
+<a href="training.html">Training & sessions</a>
+<a href="environment.html">Gym env, variants, rewards</a>
+<h4>Reference</h4>
+<a href="config.html">Configuration reference</a>
+<a href="api.html">Python / C++ API</a>
+<a href="validation.html">Validation & known limits</a>
+<h4>Plan</h4>
+<a href="plan-cll-materials.html" class="active">CLL + material model plan</a>
+</nav>
+<main>
+<h1>Plan: exact CLL + material-specific panels</h1>
+<p class="lede">How much work it would take to replace the vehicle-wide Sentman/Walker setting with a proper Cercignani–Lampis–Lord (CLL) gas–surface model, and to give each spacecraft part its own material. The material would then set that part's gas diffusion and reflection and its sunlight absorption, specular reflection and diffuse reflection. This is a plan only; no code was written.</p>
+
+<h2>Answer first</h2>
+<div class="grid">
+<div class="card"><h3>Minimum viable</h3><p><b>≈ 9–14 working days</b> (≈ 2–3 weeks)</p><p class="small">Per-panel materials for SRP (solar + IR, transmission, thermal re-emission) and for the existing GSIs (Sentman / Walker-CLL with per-panel α). Material assignment from CAD parts. Regression-locked to v2.7.</p></div>
+<div class="card"><h3>Recommended (best without DSMC)</h3><p><b>≈ 18–27 working days</b> (≈ 4–5½ weeks)</p><p class="small">Everything above, plus the exact CLL kernel via tabulated quadrature, atomic-oxygen surface coverage (so α depends on altitude and solar activity), and a per-panel temperature model feeding T_w and re-emission.</p></div>
+<div class="card"><h3>Full</h3><p><b>≈ 22–33 working days</b> (≈ 4½–7 weeks)</p><p class="small">Everything above, plus self-shadowing and flow shielding for concave geometry such as the SolarCat petals and PCB. Retraining compute comes on top.</p></div>
+</div>
+<p>Estimates are for one developer who knows this codebase, working with AI assistance, and include tests and docs. The single biggest uncertainty is not the code but the <b>material accommodation data</b> (see <a href="#data">Material data</a>).</p>
+
+<div class="note"><b>What the prototype showed (scratch code, not in the repo)</b>
+<ul style="margin:6px 0 0">
+<li>The exact CLL plate integral reduces to a <b>1-D quadrature</b>, because the CLL normal kernel is a Rice distribution with a closed-form mean. It matched the existing Walker fit to 0.02 % face-on and differed by up to 11 % at grazing incidence with α_N → 1.</li>
+<li>On the full 176-plate SolarCat, Walker and exact CLL agree within 0.3 % in C_D. <b>The kernel choice matters little. The accommodation values matter a lot.</b> Face-on C_D is 1.88 / 2.21 / 2.67 / 2.94 for α_N = 1 / 0.93 / 0.7 / 0.5. Edge-on C_D drops 32 % when σ_T goes 1 → 0.7.</li>
+<li>A direct quadrature costs about 14 µs per plate in numpy. It must be <b>tabulated</b> to stay inside the ≈ 1.2 ms/step budget used for RL.</li>
+</ul>
+So the value of this project is mainly per-panel materials and tangential accommodation, and only secondarily the exact kernel.</div>
+
+<h2>Where things stand</h2>
+<table>
+<thead><tr><th>Area</th><th>Today (v2.7)</th><th>Target</th></tr></thead>
+<tbody>
+<tr><td>Panel table</td><td><code>PanelSoA{n, A, c}</code>; <code>.geom</code> has exactly 7 columns</td><td>+ material id per plate (front/back faces are already separate plates)</td></tr>
+<tr><td>GSI</td><td>vehicle-wide <code>gsi</code>, α_E | (α_N, σ_T), T_w = 300 K</td><td>per-material model + parameters; exact CLL option; coverage-dependent α; per-panel T_w</td></tr>
+<tr><td>SRP</td><td>vehicle-wide (c_a, c_s, c_d), renormalised to 1; IR partition global</td><td>per-material solar (ρ_s, ρ_d, τ) and IR (ε, specular fraction); thermal re-emission</td></tr>
+<tr><td>Geometry</td><td>simplifier merges by normal only; part identity lost</td><td>material survives simplification (per-body simplify, or tagging)</td></tr>
+<tr><td>Occlusion</td><td>none</td><td>optional visibility maps for Sun and flow</td></tr>
+</tbody>
+</table>
+
+<figure>
+<svg viewBox="0 0 900 300" role="img" aria-label="Material data flow">
+<defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8fb4f0"/></marker></defs>
+<g font-size="12.5" fill="#d8dbe0">
+<rect x="20" y="30" width="190" height="70" rx="8" fill="#2a2d32" stroke="#363a40"/><text x="34" y="55" font-weight="600">materials.yaml</text><text x="34" y="74" fill="#9aa0a9">gas: α_n, σ_t | α_t, coverage</text><text x="34" y="90" fill="#9aa0a9">optics: ρ_s, ρ_d, τ, ε_f/ε_b</text>
+<rect x="20" y="130" width="190" height="70" rx="8" fill="#2a2d32" stroke="#363a40"/><text x="34" y="155" font-weight="600">CAD (STEP bodies)</text><text x="34" y="174" fill="#9aa0a9">body/part name →</text><text x="34" y="190" fill="#9aa0a9">material map (vehicle.yaml)</text>
+<rect x="260" y="80" width="190" height="80" rx="8" fill="#2a2d32" stroke="#363a40"/><text x="274" y="105" font-weight="600">geometry.py</text><text x="274" y="124" fill="#9aa0a9">simplify per body</text><text x="274" y="140" fill="#9aa0a9">.geom v2: + material col</text>
+<rect x="500" y="30" width="180" height="70" rx="8" fill="#2a2d32" stroke="#363a40"/><text x="514" y="55" font-weight="600">MaterialTable (C++)</text><text x="514" y="74" fill="#9aa0a9">CLL tables per material</text><text x="514" y="90" fill="#9aa0a9">built once at load</text>
+<rect x="500" y="130" width="180" height="70" rx="8" fill="#2a2d32" stroke="#363a40"/><text x="514" y="155" font-weight="600">PanelSoA + mat[]</text><text x="514" y="174" fill="#9aa0a9">+ T_w[] (thermal)</text><text x="514" y="190" fill="#9aa0a9">+ vis maps (opt.)</text>
+<rect x="720" y="30" width="160" height="70" rx="8" fill="#2a2d32" stroke="#363a40"/><text x="734" y="55" font-weight="600">sum_panels</text><text x="734" y="74" fill="#9aa0a9">per-panel GSI</text><text x="734" y="90" fill="#9aa0a9">× coverage θ(n_O,T)</text>
+<rect x="720" y="130" width="160" height="70" rx="8" fill="#2a2d32" stroke="#363a40"/><text x="734" y="155" font-weight="600">panel_srp / earth_rad</text><text x="734" y="174" fill="#9aa0a9">per-panel optics</text><text x="734" y="190" fill="#9aa0a9">+ re-emission</text>
+<rect x="500" y="230" width="380" height="50" rx="8" fill="#1f2125" stroke="#3b4d6b" stroke-dasharray="5 4"/><text x="514" y="252" fill="#8fb4f0">Simulator::step: F_B, τ_B → RK4 (unchanged)</text><text x="514" y="270" fill="#9aa0a9">StepOut gains per-material diagnostics (optional)</text>
+</g>
+<g stroke="#8fb4f0" stroke-width="1.5" fill="none">
+<path d="M210 65 L500 65" marker-end="url(#a2)"/><path d="M210 165 L260 135" marker-end="url(#a2)"/><path d="M450 120 L500 160" marker-end="url(#a2)"/>
+<path d="M680 65 L720 65" marker-end="url(#a2)"/><path d="M680 165 L720 165" marker-end="url(#a2)"/><path d="M680 150 L720 90" marker-end="url(#a2)"/>
+<path d="M800 200 L800 230" marker-end="url(#a2)"/><path d="M800 100 L800 130" stroke-dasharray="3 3"/>
+</g>
+</svg>
+<figcaption>Material data flow. Only the force kernels change; integration, control and the RL env keep their interfaces.</figcaption>
+</figure>
+
+<h2 id="physics">Physics to implement</h2>
+
+<h3>1. Exact CLL plate coefficients (phase 3)</h3>
+<p>The CLL kernel factorises into a normal part and a tangential part (Cercignani &amp; Lampis 1971; Lord 1991). Speeds are in wall thermal units \(c_w=\sqrt{2k_BT_w/m}\).</p>
+<div class="eq">\[
+R_n(w_i\!\to\! w_r)=\frac{2w_r}{\alpha_n}\exp\!\Bigl(-\frac{w_r^2+(1-\alpha_n)w_i^2}{\alpha_n}\Bigr)I_0\!\Bigl(\frac{2\sqrt{1-\alpha_n}\,w_iw_r}{\alpha_n}\Bigr),\qquad
+R_t=\frac{1}{\sqrt{\pi\alpha_t}}\exp\!\Bigl(-\frac{(w_{t,r}-\sqrt{1-\alpha_t}\,w_{t,i})^2}{\alpha_t}\Bigr)
+\]</div>
+<p>\(R_n\) is a Rice distribution with \(\nu=\sqrt{1-\alpha_n}\,w_i\) and \(\sigma^2=\alpha_n/2\), so the mean reflected normal speed has a closed form:</p>
+<div class="eq">\[
+\langle w_r\rangle(w_i)=\frac{\sqrt{\pi\alpha_n}}{2}\,e^{-x/2}\bigl[(1+x)I_0(x/2)+x\,I_1(x/2)\bigr],\qquad x=\frac{(1-\alpha_n)w_i^2}{\alpha_n}
+\]</div>
+<p>Averaging over the incident drifting Maxwellian (normal speed ratio \(u\), \(\gamma=s\cos\theta\), \(\tau_w=\sqrt{T_w/T_i}\)) gives the plate coefficients:</p>
+<div class="eq">\[
+C_p=\underbrace{\frac{(\gamma^2+\tfrac12)Z+\gamma E/\sqrt\pi}{s^2}}_{\text{incident (as Sentman)}}+\frac{2\tau_w}{s^2}\,G(\gamma,\tau_w;\alpha_n),\qquad
+G=\int_0^\infty u\,\frac{e^{-(u-\gamma)^2}}{\sqrt\pi}\,\langle w_r\rangle\!\Bigl(\frac{u}{\tau_w}\Bigr)du
+\]
+\[
+\frac{C_\tau}{\sin\theta}=\sigma_t\,\frac{\gamma Z+E/\sqrt\pi}{s},\qquad \sigma_t=1-\sqrt{1-\alpha_t}
+\]</div>
+<ul>
+<li><b>Checks built into the maths.</b> With α_n = 1, ⟨w_r⟩ = √π/2 and C_p reduces exactly to Sentman with α_E = 1. With α_n = 0 the reflection is specular in the normal direction, so C_p = 2C_{p,i}. With α_t = 0, C_τ = 0. The prototype reproduces the α = 1 identity to machine precision.</li>
+<li><b>Species independence of the table.</b> G depends only on (γ, τ_w, α_n), not on the species mass. One 2-D table per distinct α_n serves all 7 species: evaluate at \(\gamma_j=s_j\cos\theta\) and mass-weight as in ADBSat eq. 15.</li>
+<li><b>Tabulation.</b> γ ∈ [−6, 20] × τ_w ∈ [0.25, 1.25], about 512 × 48 nodes, with a cubic Hermite (store ∂G/∂γ). Build it at material load with 64-point Gauss–Legendre and scaled Bessel functions (<code>i0e/i1e</code> equivalents; std::cyl_bessel_i needs scaling to avoid overflow). That is ≈ 1.5 M kernel evaluations, well under 0.5 s once per process. The target interpolation error is ≤ 1e-5 relative, to be verified by a test.</li>
+<li><b>Name it separately</b>, for example <code>gsi: cll_kernel</code>. Keep <code>cll</code> (Walker) and <code>sentman</code> for regression and comparison.</li>
+</ul>
+
+<h3>2. Per-material gas–surface parameters (phase 2)</h3>
+<p>Each panel reads its GSI parameters from its material instead of <code>SimParams</code>. In <code>sum_panels</code> this is a gather by <code>mat[i]</code>. Walker prefactors are currently hoisted once per call; they become hoisted once per (material × species), which is still cheap with ≤ 8 materials.</p>
+
+<h3>3. Surface coverage by atomic oxygen (phase 4)</h3>
+<p>In LEO, adsorbed atomic oxygen covers most surfaces and makes them nearly diffuse regardless of the substrate. A material's "clean" behaviour shows only on the uncovered fraction. Use the Langmuir-isotherm approach of Pilinski et al. (SESAM) and Walker et al.:</p>
+<div class="eq">\[
+\theta_c=\frac{K\,P_O}{1+K\,P_O},\quad P_O=n_Ok_BT,\qquad
+C=\theta_c\,C_\text{diffuse}(\alpha{=}1)+(1-\theta_c)\,C_\text{clean}(\alpha_n,\alpha_t)
+\]</div>
+<ul>
+<li>n_O comes from MSIS. It is already queried; χ_O·n_total needs to be passed through, which requires keeping the total number density.</li>
+<li>K is a fitted constant. Take it from Pilinski, Argrow, Palo &amp; Bowman (2013) and document the value and units in code. It was not verified for this page.</li>
+<li>Effect: α becomes altitude- and solar-activity-dependent, as observed. Coverage is high below ~400 km and at solar max, and the material matters more at 500 km in solar minimum.</li>
+</ul>
+
+<h3>4. Per-material radiation pressure (phase 1)</h3>
+<p>Per face, the solar band has specular reflectance ρ_s, diffuse reflectance ρ_d and transmittance τ (thin films), with absorptance α_s = 1 − ρ_s − ρ_d − τ. The IR band has emissivity ε (= IR absorptance) and an IR specular fraction.</p>
+<div class="eq">\[
+\mathbf F_i=-P A_i\cos\theta\Bigl[(\alpha_s+\rho_d)\hat s+\bigl(2\rho_s\cos\theta+\tfrac23\rho_d\bigr)\hat n_i\Bigr]\;-\;P A_i\cos\theta\;\alpha_s\,\frac{\tfrac23(\varepsilon_f-\varepsilon_b)}{\varepsilon_f+\varepsilon_b}\,\hat n_i
+\]</div>
+<ul>
+<li>This is the same law as today with (c_a, c_s, c_d) → (α_s, ρ_s, ρ_d) per panel, <b>without the renormalisation to 1</b>, so transmitted light exerts no force.</li>
+<li>The second term is steady-state thermal re-emission of a thin sheet with Lambertian front/back emission (McInnes 1999). A <code>reemission</code> mode per material covers the cases: <code>thin_sheet</code> (uses ε_f, ε_b), <code>none</code> (thick body, conducts internally), or <code>thermal</code> (phase 5, uses computed face temperatures: \(\tfrac{2}{3}\varepsilon\sigma T^4/c\) per face).</li>
+<li>Earth IR uses ε and the IR specular fraction; albedo uses the solar-band values.</li>
+<li>The current vehicle-wide presets become materials (<code>al_mylar</code>, <code>black_kapton</code>, …), so old configs map onto the new path one-to-one.</li>
+</ul>
+
+<h3>5. Panel temperature (phase 5, optional)</h3>
+<p>A one-node-per-face (or per face pair for thin sheets) energy balance. The inputs are absorbed Sun + albedo + Earth IR; the outputs are radiation from both faces and optional conduction to a structure node. It is integrated per substep with areal heat capacity from the material.</p>
+<div class="eq">\[
+c_A\,\dot T=\alpha_s S\cos\theta_\odot+\alpha_s S_\text{alb}+\varepsilon_f q_\text{IR}-(\varepsilon_f+\varepsilon_b)\sigma T^4
+\]</div>
+<p>T feeds T_w in the GSI (it matters: C_{p,r} ∝ √T_w) and the re-emission force. Membranes respond in minutes, so the eclipse/sunlit cycling is captured.</p>
+
+<h3>6. Self-shadowing and flow shielding (phase 7, optional)</h3>
+<p>For each panel, precompute a visibility fraction over a direction grid (Fibonacci sphere, ~2–4 k directions) by ray-casting the full mesh (trimesh + embree, offline). At run time, look up the Sun direction (for SRP) and the flow direction (for aero, in the hyperthermal approximation) per panel. This is exact for flat membranes, and it fixes concave assemblies where the PCB and beams shade the petals.</p>
+
+<h2 id="data">Material data: the real limit on accuracy</h2>
+<div class="warn"><b>Honest caveat</b>
+Once α is given, CLL is exact within the kernel's assumptions. But there is no authoritative per-material table of LEO accommodation coefficients. Laboratory values are for clean surfaces and specific beam energies, and flight-derived values are for whole satellites. The plan therefore treats gas-side values as <b>priors with uncertainty</b>, randomises them in training, and keeps a path to calibrate them against tracking data (TLE/POD-derived drag) or offline DSMC (e.g. SPARTA with the CLL model) of your actual geometry.</div>
+
+<h3>Starter library (typical values; verify against datasheets)</h3>
+<table>
+<thead><tr><th>Material</th><th>α_s</th><th>ε</th><th>Reflection type</th><th>Gas side (clean) prior</th></tr></thead>
+<tbody>
+<tr><td>VDA / aluminised Mylar or Kapton, metal side</td><td>0.08–0.12</td><td>0.03–0.05</td><td>mostly specular (ρ_s ≈ 0.85–0.9)</td><td>α_n 0.5–0.9, σ_t 0.6–0.9 [ASSUME]</td></tr>
+<tr><td>Kapton, polymer side</td><td>0.35–0.5</td><td>0.6–0.8 (thickness-dependent)</td><td>mixed</td><td>as above [ASSUME]</td></tr>
+<tr><td>Black Kapton</td><td>≈ 0.92</td><td>≈ 0.85</td><td>diffuse</td><td>[ASSUME]</td></tr>
+<tr><td>GaAs triple-junction cell + cover glass</td><td>0.88–0.92</td><td>0.80–0.85</td><td>small specular (glass)</td><td>[ASSUME]</td></tr>
+<tr><td>White paint (AZ-93 / Z-93 class)</td><td>0.15–0.17</td><td>0.90–0.92</td><td>diffuse</td><td>[ASSUME]</td></tr>
+<tr><td>Black paint (Z306 class)</td><td>≈ 0.95</td><td>0.87–0.90</td><td>diffuse</td><td>[ASSUME]</td></tr>
+<tr><td>Bare polished aluminium</td><td>0.10–0.20</td><td>0.03–0.05</td><td>specular-dominant</td><td>[ASSUME]</td></tr>
+<tr><td>Clear-anodised aluminium</td><td>0.3–0.4</td><td>0.7–0.85</td><td>diffuse-dominant</td><td>[ASSUME]</td></tr>
+<tr><td>CFRP</td><td>≈ 0.9</td><td>0.8–0.85</td><td>diffuse</td><td>[ASSUME]</td></tr>
+<tr><td>AO-covered (any)</td><td>—</td><td>—</td><td>—</td><td>α_n ≈ 1, σ_t ≈ 1 (the "contaminated" state)</td></tr>
+</tbody>
+</table>
+<p class="small">Optical sources: Henninger, NASA RP-1121 (1984); Gilmore, <i>Spacecraft Thermal Control Handbook</i> Vol. I, App. A; McInnes (1999) for sail films. The specular/diffuse split is rarely tabulated, so measure it (BRDF) or treat it as uncertain. Values in this table are ranges from memory of those sources and must be checked before use.</p>
+
+<h2 id="geometry">File formats and configuration</h2>
+<h3>materials.yaml (new, <code>config/plant/materials.yaml</code>)</h3>
+<pre><code>al_mylar_front:
+  gas:     {model: cll_kernel, alpha_n: 0.80, alpha_t: 0.85, coverage: sesam}   <span class="c"># alpha_t = CLL energy accommodation; sigma_t derived</span>
+  solar:   {rho_s: 0.88, rho_d: 0.04, tau: 0.0}                                <span class="c"># alpha_s = 0.08</span>
+  ir:      {eps: 0.04, spec_frac: 0.9}
+  thermal: {reemission: thin_sheet, eps_back: 0.60, c_area_J_m2K: 35.0}
+  uncertainty: {alpha_n: [0.6, 0.95], alpha_t: [0.6, 1.0], rho_s: [0.80, 0.90]}   <span class="c"># for domain randomisation</span>
+gaas_cell:
+  gas:     {model: cll_kernel, alpha_n: 0.90, alpha_t: 0.95, coverage: sesam}
+  solar:   {rho_s: 0.06, rho_d: 0.02, tau: 0.0}
+  ir:      {eps: 0.85, spec_frac: 0.1}
+  thermal: {reemission: none}</code></pre>
+
+<h3>Assigning materials to plates</h3>
+<ol>
+<li><b><code>.geom</code> v2</b>: an optional 8th column with the material name. The loader accepts 7 or 8 columns (7 → the vehicle default material), so old files keep working.</li>
+<li><b>From CAD</b>: STEP files carry bodies and parts. Simplify each body separately (cascadio gives per-body meshes), then concatenate and tag the plates. The vehicle card maps names to materials: <code>materials: {Membrane*: al_mylar_front, Cell*: gaas_cell, Beam*: cfrp, PCB: fr4}</code>, with front/back chosen by normal sign for thin sheets.</li>
+<li><b>Existing 176-plate SolarCat</b>: a small tagging script (spatial rules: z-normal membrane faces, beam boxes, PCB) writes the 8th column. This avoids re-simplifying.</li>
+<li><code>damage.py</code> must keep <code>mat[]</code> aligned when it rescales areas (it does not reorder plates, so this is low risk).</li>
+</ol>
+
+<h2>Code touch-points</h2>
+<table>
+<thead><tr><th>File</th><th>Change</th><th>Phase</th></tr></thead>
+<tbody>
+<tr><td><code>cpp/include/arlamx/types.hpp</code></td><td><code>PanelSoA</code> gains <code>std::vector&lt;uint16_t&gt; mat</code> (and later <code>Tw</code>); new <code>Material</code> / <code>MaterialTable</code> structs</td><td>0</td></tr>
+<tr><td><code>cpp/src/aero/sentman.cpp</code> (<code>sum_panels</code>)</td><td>per-panel GSI dispatch by <code>mat[i]</code>; coverage blend; hoisting per (material, species)</td><td>2, 4</td></tr>
+<tr><td><code>cpp/src/aero/cll.cpp</code> + new <code>cll_kernel.cpp</code></td><td>Rice-mean quadrature, 2-D Hermite table, species mix</td><td>3</td></tr>
+<tr><td><code>cpp/src/srp/panel_srp.cpp</code></td><td>per-panel optics, no renormalisation, transmission, re-emission; Earth IR per-panel ε</td><td>1</td></tr>
+<tr><td><code>cpp/src/api.cpp</code>, <code>api.hpp</code></td><td><code>Simulator::set_materials</code>, pass the table to the kernels, optional thermal state per panel, per-material diagnostics in StepOut</td><td>0, 5</td></tr>
+<tr><td><code>cpp/src/bindings.cpp</code></td><td><code>set_panels(n, A, c, mat=None)</code>, <code>set_materials(list[dict])</code>, <code>cll_kernel(...)</code> for tests</td><td>0, 3</td></tr>
+<tr><td><code>python/arlamx_v2/geometry.py</code></td><td><code>load_geom</code>/<code>write_geom</code> 8th column; per-body STEP simplify; tagging helper</td><td>0, 6</td></tr>
+<tr><td><code>python/arlamx_v2/physics.py</code>, <code>sail_optics.py</code></td><td><code>materials:</code> section, validation, legacy presets → materials</td><td>0, 1</td></tr>
+<tr><td><code>python/arlamx_v2/atmosphere.py</code>, <code>env.py</code></td><td>pass n_O (or the total number density) for coverage; material domain randomisation at reset</td><td>4, 8</td></tr>
+<tr><td><code>config/plant/vehicle*.yaml</code></td><td><code>materials:</code> name→material map, default material</td><td>6</td></tr>
+<tr><td><code>session.py</code></td><td>snapshot the resolved material table</td><td>8</td></tr>
+<tr><td><code>tests/aero</code>, <code>tests/srp</code>, <code>tests/geometry</code>, <code>tests/physics</code></td><td>tests below</td><td>all</td></tr>
+</tbody>
+</table>
+
+<h2>Phases and effort</h2>
+<table>
+<thead><tr><th>Phase</th><th>Scope</th><th>Days</th><th>Depends on</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>Material data model: YAML schema, C++ table, <code>PanelSoA.mat</code>, bindings, <code>.geom</code> v2 loader. Uniform-material regression lock.</td><td>2–3</td><td>—</td></tr>
+<tr><td>1</td><td>Per-panel SRP: solar + IR bands, transmission, thin-sheet re-emission. Legacy presets as materials.</td><td>2–3</td><td>0</td></tr>
+<tr><td>2</td><td>Per-panel GSI parameters on the existing Sentman / Walker kernels</td><td>1–1.5</td><td>0</td></tr>
+<tr><td>3</td><td>Exact CLL kernel: quadrature, table, species mix, <code>gsi: cll_kernel</code>, validation</td><td>4–6</td><td>2</td></tr>
+<tr><td>4</td><td>AO surface coverage (Langmuir/SESAM), n_O plumbing</td><td>2–3</td><td>2 (3 preferred)</td></tr>
+<tr><td>5</td><td>Panel thermal model → T_w and re-emission</td><td>3–4</td><td>1, 2</td></tr>
+<tr><td>6</td><td>Material assignment: per-body STEP simplify, name map, SolarCat tagging script</td><td>2–4</td><td>0</td></tr>
+<tr><td>7</td><td>Self-shadowing / flow shielding visibility maps (optional)</td><td>4–6</td><td>0</td></tr>
+<tr><td>8</td><td>Integration: env randomisation, snapshots, performance pass, docs, before/after decay + eval report</td><td>2–3</td><td>all used</td></tr>
+<tr><td colspan="2"><b>Minimum viable</b> = 0 + 1 + 2 + 6 + 8</td><td><b>9–14.5</b></td><td></td></tr>
+<tr><td colspan="2"><b>Recommended</b> = minimum + 3 + 4 + 5</td><td><b>18–27.5</b></td><td></td></tr>
+<tr><td colspan="2"><b>Full</b> = recommended + 7</td><td><b>22–33.5</b></td><td></td></tr>
+</tbody>
+</table>
+<p class="small">The headline ranges round these. They do not include retraining: every change alters the plant, so v2.7 policies need re-evaluation and most likely retraining, at campaign-dependent compute cost.</p>
+
+<h2>Performance budget</h2>
+<ul>
+<li>Today: ≈ 1.23 ms per env step (150 substeps × 176 panels on SolarCat, or the hex model).</li>
+<li>The per-panel material gather is negligible. The CLL table lookup is about the cost of the current Walker evaluation (one erf/exp plus a cubic interpolation per species). The coverage blend doubles the kernel work: evaluate the diffuse and clean coefficients and blend them.</li>
+<li>Thermal: a few flops per face per substep. Visibility: two table lookups per panel per substep.</li>
+<li>Target: ≤ 2 ms/step at recommended scope. Add a benchmark test that fails above a threshold.</li>
+</ul>
+
+<h2>Validation plan</h2>
+<table>
+<thead><tr><th>Test</th><th>Pass criterion</th></tr></thead>
+<tbody>
+<tr><td>T-MAT-1 regression lock</td><td>A single material equal to the v2.7 global settings reproduces v2.7 forces, torques and a 1-day SolarCat trajectory to ≤ 1e-12 relative (bit-identical where possible).</td></tr>
+<tr><td>T-MAT-2 additivity</td><td>Plates split into two materials: force = sum of the two single-material computations.</td></tr>
+<tr><td>T-CLLK-1 diffuse limit</td><td>α_n = α_t = 1 → Sentman α_E = 1 to ≤ 1e-10 over θ ∈ [0, 90°], s ∈ {2, 8, 20}.</td></tr>
+<tr><td>T-CLLK-2 specular limit</td><td>α_n = α_t = 0 → C_p = 2C_{p,i}, C_τ = 0.</td></tr>
+<tr><td>T-CLLK-3 Walker agreement</td><td>Face-on and 45° within 1 % of Walker over α_n ∈ [0.3, 0.99]; grazing differences reported, not asserted.</td></tr>
+<tr><td>T-CLLK-4 Monte-Carlo kernel check (test-only)</td><td>Sampled CLL reflection of 10⁶ molecules from a drifting Maxwellian agrees with the table within 3σ of MC error.</td></tr>
+<tr><td>T-CLLK-5 table accuracy</td><td>Interpolated G vs direct quadrature ≤ 1e-5 relative over the grid, including off-node points.</td></tr>
+<tr><td>T-CLLK-6 literature</td><td>ADBSat plate/sphere cases and Walker et al. (2014) figure points within the digitisation error.</td></tr>
+<tr><td>T-SRP-M1 energy</td><td>α_s + ρ_s + ρ_d + τ = 1 is enforced; τ = 1 gives zero force; uniform material equals the v2.7 optical law.</td></tr>
+<tr><td>T-SRP-M2 re-emission</td><td>Sign and magnitude match McInnes' flat-sail example; ε_f = ε_b gives zero.</td></tr>
+<tr><td>T-ADS-1 coverage</td><td>θ_c → 1 gives the diffuse result and θ_c → 0 the clean result; monotone in P_O.</td></tr>
+<tr><td>T-TH-1 thermal</td><td>Steady state matches \(\alpha_sS=(\varepsilon_f+\varepsilon_b)\sigma T^4\) for an isolated plate; the eclipse cool-down time constant matches the analytic value.</td></tr>
+<tr><td>Decay study</td><td>SolarCat 500 → 300 km min/max-drag decay: v2.7 vs uniform material (equal) vs realistic materials (report the difference).</td></tr>
+</tbody>
+</table>
+
+<h2>Risks and open decisions</h2>
+<ul>
+<li><b>α_t vs σ_T naming.</b> Decide whether YAML takes the CLL α_t (then convert with σ_t = 1 − √(1 − α_t)) or σ_T directly, and rename the current <code>aero.alpha_t</code> accordingly. Today it is σ_T under an α name.</li>
+<li><b>Accommodation data.</b> Values are uncertain by tens of percent. Mitigate with domain randomisation and a calibration hook, and report results as bands.</li>
+<li><b>Plant change invalidates comparisons</b> with every campaign in <code>outputs/.old</code>. The regression lock (T-MAT-1) keeps a v2.7-equivalent mode for apples-to-apples runs.</li>
+<li><b>Hyperthermal shielding.</b> Flow visibility maps assume straight-line molecular paths (valid for s ≳ 5). Light species (H, He; s ≈ 2–4) partly wrap around edges. This is acceptable because they carry little momentum at these altitudes.</li>
+<li><b>Out of scope:</b> DSMC in the loop, multiple molecular reflections between panels, atomic-oxygen erosion (mass loss) and UV ageing of the optics. Ageing could later be a slow time-dependent material drift.</li>
+</ul>
+
+<h2>Suggested order</h2>
+<ol>
+<li>Phase 0 with the T-MAT-1 lock. Nothing changes numerically.</li>
+<li>Phases 1 + 2 + 6. This is the biggest accuracy gain per day: real optics and accommodation per part.</li>
+<li>Phase 3 (exact CLL), then 4 (coverage). Together they make α physically dependent on the environment.</li>
+<li>Phase 5 if the thermal re-emission or T_w sensitivity turns out to be significant in the decay study.</li>
+<li>Phase 7 only if the SolarCat analysis shows material shading, e.g. by comparing projected area with and without ray-casting at a few attitudes (a 1-hour check before committing 4–6 days).</li>
+</ol>
+
+<h2>References</h2>
+<ol class="small">
+<li>Cercignani, C. &amp; Lampis, M. (1971). <i>TTSP</i> 1, 101–114. Lord, R. G. (1991). <i>Phys. Fluids A</i> 3, 706–710.</li>
+<li>Walker, A., Mehta, P. &amp; Koller, J. (2014). <i>J. Spacecraft Rockets</i> 51(5), 1544–1563.</li>
+<li>Pilinski, M. D., Argrow, B. M., Palo, S. E. &amp; Bowman, B. R. (2013). Semi-empirical satellite accommodation model for spherical and randomly tumbling objects. <i>J. Spacecraft Rockets</i> 50(3).</li>
+<li>Mehta, P. M. et al. (2014). Comparing physical drag coefficients computed using different gas–surface interaction models. <i>J. Spacecraft Rockets</i> 51(3).</li>
+<li>Sinpetru, L. A. et al. (2022). ADBSat: methodology of a novel panel method tool for aerodynamic analysis of satellites. <i>Comput. Phys. Commun.</i> (arXiv:2104.05543).</li>
+<li>McInnes, C. R. (1999). <i>Solar Sailing.</i> Springer, ch. 2 (optical force model incl. re-emission).</li>
+<li>Henninger, J. H. (1984). Solar absorptance and thermal emittance of some common spacecraft thermal-control coatings. NASA RP-1121.</li>
+<li>Gilmore, D. G. (ed.) (2002). <i>Spacecraft Thermal Control Handbook</i>, Vol. I. Aerospace Press.</li>
+</ol>
+
+<footer>ARLAMX v2.7 documentation · generated 2026-09-30 from the source tree (cpp/, python/arlamx_v2/, config/). Equations render with KaTeX when online; offline they show as TeX.</footer>
+</main>
+</div>
+</body>
+</html>
