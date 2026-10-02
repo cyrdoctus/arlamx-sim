@@ -56,7 +56,7 @@ main.py           front door
 cpp/              plant: aero, radiation, gravity, attitude, magnetorquers
 python/arlamx_v2/ Gym env, geometry simplifier, trainers
 config/           network, orbit, train, and plant YAML
-data/             GGM03S, WMM, hex .geom, SolarCat mesh
+data/             GGM03S and WMM only; meshes and plate models stay local
 docs/guide/       user guide (open index.html)
 docs/html/        physics reference
 docs/notes/       development writing (plans, changelogs, handoffs)

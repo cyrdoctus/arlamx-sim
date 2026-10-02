@@ -24,6 +24,13 @@ python/arlamx_v2/*.pyd
 # Training runs, campaign artifacts, figures, slide node_modules
 outputs/
 
+# Local geometry and trajectory tables. The published data/ tree keeps
+# the gravity and magnetic coefficients only.
+data/*
+!data/GGM03S.txt
+!data/WMM.COF
+!data/WMM2025.COF
+
 node_modules/
 
 # Editor and OS
